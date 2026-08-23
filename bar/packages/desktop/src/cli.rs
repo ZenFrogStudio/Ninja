@@ -9,7 +9,7 @@ use crate::{
 };
 
 #[derive(Clone, Debug, Parser)]
-#[clap(name = "ninja-bar", author, version = VERSION_NUMBER, about, long_about = None)]
+#[clap(name = "ninja", author, version = VERSION_NUMBER, about, long_about = None)]
 pub struct Cli {
   #[command(subcommand)]
   command: Option<CliCommand>,
