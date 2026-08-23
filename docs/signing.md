@@ -60,7 +60,7 @@ develop and test against a real install.
 Once, from an **elevated** PowerShell:
 
 ```powershell
-cd D:\03-Software\Ninja
+cd <repo root>
 .\resources\scripts\dev-cert.ps1
 ```
 

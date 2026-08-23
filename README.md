@@ -10,7 +10,7 @@ Ninja is a deliberate evolution of GlazeWM, with Zebar integrated directly into 
 ## Implementation
 
 **Installation**
-Execution of `dist/ninja-setup.exe` installs the application to `C:\Program Files\Ninja`. It configures the system path and provisions the WebView2 runtime only if required. Removal is handled cleanly through standard system utilities.
+Execution of `ninja-setup.exe` — from the Releases page, or produced at `out/ninja-setup.exe` by the build below — installs the application to `C:\Program Files\Ninja`. It configures the system path and provisions the WebView2 runtime only if required. Removal is handled cleanly through standard system utilities.
 
 **Configuration**
 Control is centralized and transparent. The primary configuration resides at `~/.ninja/config.yaml`, generated from a precise template upon first execution.

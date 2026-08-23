@@ -14,9 +14,16 @@ node_modules/
 
 # Misc
 .DS_Store
-*.pem
 *.env
 .wix/
+
+# Keys and certificates
+*.pem
+*.key
+*.cer
+*.crt
+*.pfx
+*.p12
 
 # IDE files
 .vs/
