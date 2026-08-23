@@ -1,0 +1,76 @@
+[package]
+name = "ninja"
+version = "0.0.0"
+description = "Ninja is a tiling window manager with a built-in status bar."
+authors = ["Ninja"]
+license = "GPL-3.0-only"
+repository = ""
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+# Named explicitly rather than taking the default from the crate name, so
+# the filename stays pinned even if the crate is renamed again. The WM
+# resolves the bar by this filename (`BAR_BINARY_NAME` in `sys_tray.rs`).
+[[bin]]
+name = "ninja"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+clap = { version = "4", features = ["derive", "env"] }
+crossbeam = "0.8"
+globset = "0.4"
+netdev = "0.33"
+regex = "1"
+rocket = { version = "0.5", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+shell-util = { path = "../../crates/shell-util" }
+starship-battery = "0.8"
+sysinfo = "0.30"
+tauri = { version = "2", features = [
+  "devtools",
+  "macos-private-api",
+  "protocol-asset",
+  "tray-icon",
+  "webview-data-url",
+] }
+tauri-plugin-dialog = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-shell = "2"
+tera = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { workspace = true }
+wm-common = { path = "../../../packages/wm-common" }
+wm-ipc-client = { path = "../../../packages/wm-ipc-client" }
+wm = { path = "../../../packages/wm" }
+wm-cli = { path = "../../../packages/wm-cli" }
+wm-platform = { path = "../../../packages/wm-platform" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+systray-util = { path = "../../crates/systray-util" }
+komorebi-util = { path = "../../crates/komorebi-util" }
+windows-core = { workspace = true }
+windows = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+cocoa = "0.25"
+komorebi-util = { path = "../../crates/komorebi-util" }
+
+[features]
+# This feature is used for production builds or when `devPath` points to the
+# filesystem. Do not remove!
+custom-protocol = ["tauri/custom-protocol"]
+
+# Enables the `uiAccess` manifest attribute, which the window manager needs
+# to position windows owned by elevated processes. Only usable on signed
+# builds installed to a secure location; see `docs/signing.md`.
+ui_access = []

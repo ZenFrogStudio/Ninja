@@ -1,0 +1,36 @@
+# {{ WIDGET_NAME }}
+
+Generated via SolidJS TypeScript template.
+
+## Client API
+
+This template bundles the client API from the `zebar` package on npm, since
+Ninja publishes no package of its own. That is the upstream client, not the
+one this build of Ninja serves, so the two can drift apart between versions.
+
+If you hit a mismatch, use the buildless template instead — it imports
+`/__ninja/client.js`, which Ninja serves from the running app and is always
+in step with it.
+
+## Usage
+
+```bash
+$ npm install # or pnpm install or yarn install
+```
+
+### Learn more on the [Solid Website](https://solidjs.com) and come chat with us on our [Discord](https://discord.com/invite/solidjs)
+
+## Available Scripts
+
+In the project directory, you can run:
+
+### `npm run dev`
+
+Runs the app in the development mode.
+
+### `npm run build`
+
+Builds the app for production to the `dist` folder.<br>
+It bundles Solid in production mode and optimizes the build for the best performance.
+
+The build is minified and the filenames include the hashes.<br>

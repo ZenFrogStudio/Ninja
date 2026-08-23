@@ -1,0 +1,8 @@
+# Pinned to an exact nightly rather than tracking the channel.
+#
+# An unpinned nightly means CI (and local builds) can break from an
+# upstream release with no change on your side — new lints turn into
+# errors under `-D warnings`, and language changes land unannounced.
+# Bump this deliberately.
+[toolchain]
+channel = "nightly-2026-08-16"

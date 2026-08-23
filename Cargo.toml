@@ -1,0 +1,62 @@
+[workspace]
+resolver = "2"
+members = ["packages/*", "bar/packages/desktop", "bar/crates/*"]
+default-members = [
+  "packages/wm-cli",
+  "packages/wm-watcher",
+  "bar/packages/desktop",
+]
+
+[workspace.dependencies]
+anyhow = { version = "1", features = ["backtrace"] }
+clap = { version = "4", features = ["derive", "env"] }
+futures-util = "0.3"
+home = "0.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+tauri-winres = "0.1"
+thiserror = "2"
+regex = "1"
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.26"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+wm-macros = { path = "packages/wm-macros" }
+
+# Used by the vendored bar. Kept at 0.58 rather than the 0.52 that
+# `wm-platform` pins directly, since the two are semver-incompatible and
+# Cargo builds both side by side.
+windows-core = "0.58"
+windows = { version = "0.58", features = [
+  "Foundation",
+  "Foundation_Collections",
+  "implement",
+  "Media_Control",
+  "Win32_Devices_FunctionDiscovery",
+  "Win32_Globalization",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Gdi",
+  "Win32_Media",
+  "Win32_Media_Audio",
+  "Win32_Media_Audio_Endpoints",
+  "Win32_Security",
+  "Win32_System_Com",
+  "Win32_System_Console",
+  "Win32_System_DataExchange",
+  "Win32_System_Diagnostics_Debug",
+  "Win32_System_Memory",
+  "Win32_System_SystemServices",
+  "Win32_System_Threading",
+  "Win32_UI_Controls",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Shell_PropertiesSystem",
+  "Win32_UI_TextServices",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_NetworkManagement_WiFi",
+] }
+
+[workspace.lints]
+clippy.all = { level = "warn", priority = -1 }
+clippy.pedantic = { level = "warn", priority = -1 }
+clippy.missing_errors_doc = "allow"

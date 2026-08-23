@@ -1,0 +1,149 @@
+<Wix
+  xmlns="http://wixtoolset.org/schemas/v4/wxs"
+  xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+  xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal"
+  xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <!--
+    `INCLUDE_X64` and `INCLUDE_ARM64` are set by `package.ps1` from the Rust
+    targets actually installed on the build machine. A machine set up for
+    one architecture still produces a working setup for that architecture,
+    rather than failing on a missing MSI.
+  -->
+  <?ifndef INCLUDE_X64 ?>
+  <?define INCLUDE_X64 = "no" ?>
+  <?endif?>
+  <?ifndef INCLUDE_ARM64 ?>
+  <?define INCLUDE_ARM64 = "no" ?>
+  <?endif?>
+
+  <Bundle Name="Ninja" Version="$(var.VERSION_NUMBER)"
+    UpgradeCode="fb59d032-1c18-4b8e-ac2d-0fed46f209c5"
+    Manufacturer="Ninja"
+    DisableModify="yes"
+    DisableRemove="yes"
+    IconSourceFile="resources/assets/icon.ico"
+  >
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication
+        LicenseUrl=""
+        Theme="hyperlinkSidebarLicense"
+        ThemeFile="resources/wix/bundle-theme.xml"
+        LocalizationFile="resources/wix/bundle-theme.wxl"
+        SuppressOptionsUI="yes"
+        ShowVersion="yes" />
+    </BootstrapperApplication>
+
+    <!--
+      The window manager and the bar are one program now, shipped in a
+      single MSI, so there is nothing to install separately. The theme's
+      checkbox is fixed on and disabled.
+    -->
+    <Variable Name="Custom_InstallWm" Type="numeric" Value="1" bal:Overridable="yes" />
+
+    <!--
+      Shortcut choices, collected on the bundle's own welcome page and
+      handed to the WM's MSI below. They live here rather than in that
+      MSI's dialogs because the chained packages deliberately run with no
+      UI of their own — see the note on the chain.
+    -->
+    <Variable Name="Custom_DesktopShortcut" Type="numeric" Value="0" bal:Overridable="yes" />
+    <Variable Name="Custom_StartMenuShortcut" Type="numeric" Value="1" bal:Overridable="yes" />
+
+    <!--
+      No package sets `bal:DisplayInternalUICondition`. Letting a chained
+      MSI draw its own UI on top of the bundle's is what produced
+      "error 2884" and a heap corruption crash in the Burn engine
+      (0xc0000374) when the bar was running and Restart Manager tried to
+      raise a FilesInUse prompt. Ref:
+      https://github.com/wixtoolset/issues/issues/8695
+      The bundle's theme is the only UI; the MSIs run silently beneath it
+      and take their options as properties.
+    -->
+    <!--
+      Detection for the WebView2 runtime, read from the registry keys
+      Microsoft documents for the Evergreen release. Both the per-machine
+      and per-user locations are checked: an unelevated install writes only
+      the latter, and missing it would reinstall the runtime machine-wide
+      on a system that already has it.
+    -->
+    <util:RegistrySearch
+      Id="WebView2MachineVersion"
+      Root="HKLM"
+      Key="SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+      Value="pv"
+      Result="value"
+      Variable="WebView2MachineVersion" />
+
+    <util:RegistrySearch
+      Id="WebView2UserVersion"
+      Root="HKCU"
+      Key="SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+      Value="pv"
+      Result="value"
+      Variable="WebView2UserVersion" />
+
+    <Chain>
+      <!--
+        The bar renders in WebView2, so the app cannot start without the
+        runtime. This used to be handled by the bar's own Tauri-generated
+        MSI; that package is gone now that the bar and the window manager
+        ship as one binary, so the dependency is declared here instead.
+
+        Detection is the per-machine registry key Microsoft documents for
+        the Evergreen runtime, plus the per-user key that an unelevated
+        install writes. `DetectCondition` being false is what triggers the
+        download, so both have to be checked or an existing per-user
+        runtime would be reinstalled machine-wide.
+
+        Windows 11 ships the runtime, and Windows 10 has had it through
+        Edge servicing since 2021, so this is expected to no-op on most
+        machines. `Permanent="yes"` leaves it installed on uninstall:
+        other applications share it, and removing it would break them.
+
+        The bootstrapper is downloaded by `package.ps1` and embedded,
+        rather than fetched by Burn at install time. A remote payload has
+        to carry a hash that matches the file byte for byte, and Microsoft
+        revises that download in place — embedding it avoids shipping a
+        setup that breaks the next time they do.
+      -->
+      <ExePackage
+        Id="Custom_WebView2Runtime"
+        DisplayName="Microsoft Edge WebView2 Runtime"
+        SourceFile="out/MicrosoftEdgeWebview2Setup.exe"
+        Permanent="yes"
+        Vital="yes"
+        Compressed="yes"
+        PerMachine="yes"
+        DetectCondition="WebView2MachineVersion OR WebView2UserVersion"
+        InstallArguments="/silent /install" />
+
+      <?if $(var.INCLUDE_X64) = "yes" ?>
+      <!-- Window manager MSI for x64 architectures. -->
+      <MsiPackage
+        Id="Custom_NinjaWmPackageX64"
+        SourceFile="out/ninja-wm-x64.msi"
+        InstallCondition="(VersionNT64 AND NOT NativeMachine) OR (NativeMachine = 34404)"
+        Permanent="yes"
+      >
+        <MsiProperty Name="ENABLE_DESKTOP_SHORTCUT" Value="[Custom_DesktopShortcut]" />
+        <MsiProperty Name="ENABLE_START_MENU_SHORTCUT" Value="[Custom_StartMenuShortcut]" />
+      </MsiPackage>
+
+      <?endif?>
+
+      <?if $(var.INCLUDE_ARM64) = "yes" ?>
+      <!-- Window manager MSI for arm64 architectures. -->
+      <MsiPackage
+        Id="Custom_NinjaWmPackageArm64"
+        SourceFile="out/ninja-wm-arm64.msi"
+        InstallCondition="NativeMachine = 43620"
+        Permanent="yes"
+      >
+        <MsiProperty Name="ENABLE_DESKTOP_SHORTCUT" Value="[Custom_DesktopShortcut]" />
+        <MsiProperty Name="ENABLE_START_MENU_SHORTCUT" Value="[Custom_StartMenuShortcut]" />
+      </MsiPackage>
+
+      <?endif?>
+    </Chain>
+  </Bundle>
+</Wix>

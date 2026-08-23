@@ -1,0 +1,41 @@
+{
+  "name": "ninja",
+  "version": "3.0.0",
+  "description": "Client API for Ninja widgets.",
+  "repository": "",
+  "license": "GPL-3.0-only",
+  "author": "Ninja",
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "pnpm build --watch src",
+    "dev:local": "pnpm dev",
+    "prepublishOnly": "pnpm build"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.0.2",
+    "@tauri-apps/plugin-dialog": "2.0.0",
+    "glazewm": "1.7.0",
+    "luxon": "3.4.4",
+    "zod": "3.24.2"
+  },
+  "devDependencies": {
+    "@types/luxon": "3.4.2",
+    "esbuild": "0.20.0",
+    "tsup": "8.0.2",
+    "typescript": "5.3.3"
+  }
+}

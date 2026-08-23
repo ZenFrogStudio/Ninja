@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-read-wm-settings"
+description = "Enables the read_wm_settings command without any pre-configured scope."
+commands.allow = ["read_wm_settings"]
+
+[[permission]]
+identifier = "deny-read-wm-settings"
+description = "Denies the read_wm_settings command without any pre-configured scope."
+commands.deny = ["read_wm_settings"]
