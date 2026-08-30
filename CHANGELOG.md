@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.3.1 — 2026-08-30
+
+### Fixed
+
+- The WM no longer freezes when moving focus onto a workspace whose most
+  recently focused window is floating, minimized, or fullscreen. The
+  iterator over a container's focus order never advanced — it re-scanned
+  from the start on every step, so it returned the same child forever and
+  never ended. Searching it for a tiling child therefore spun on the spot.
+  Because the WM runs its event loop on one thread, that one search took
+  everything down with it: keybindings stopped responding, the bar stopped
+  updating, and the redraw that hides the windows of workspaces you aren't
+  looking at never ran, leaving every window from every workspace on screen
+  at once.
+- Workspaces added with the bar's **+** button now come back to the screen
+  they were added on. They were recorded against the monitor's *position*,
+  which the WM recomputes from screen coordinates on every display change,
+  so a resolution change, a monitor waking up, or rearranging the displays
+  could send the workspace to a different screen. They're now recorded
+  against the display itself — its device path on Windows, its UUID on
+  macOS — which is the same identifier the WM already uses to recognise a
+  monitor across a disconnect.
+
+  Existing `workspaces.json` files keep working: an entry written before
+  this change still binds by index until the workspace is added again.
+- Workspaces displaced by a monitor disconnect now return to that monitor
+  when it comes back. Tearing a monitor down moves its workspaces onto a
+  surviving monitor so their windows aren't lost, but only workspaces bound
+  via `bind_to_monitor` were ever moved back — the rest stayed piled up on
+  one screen. This is most visible on Windows, which can reissue a
+  monitor's handle across a display wake and make a panel that never went
+  away look like a new one. Each displaced workspace now remembers where it
+  came from until it gets back, and a workspace you move yourself stays
+  where you put it.
+- The bar now starts on installs carried over from GlazeWM and Zebar.
+  Startup settings written before the fork ask for the `glzr-io.starter`
+  pack and its `with-glazewm` widget, both of which were renamed, so
+  nothing matched and the bar came up empty. Those names are now migrated
+  to `ninja.starter` and `with-ninja`.
+
+  The starter pack is also reinstalled whenever its files are missing
+  rather than only on a first run. Packs are stored under the application
+  name, so the rename left the previous downloads stranded while the
+  config directory — which records what is installed — carried over intact.
+
 ## 0.3.0 — 2026-08-23
 
 ### Changed

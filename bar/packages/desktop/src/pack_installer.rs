@@ -1,13 +1,13 @@
 use std::{
   fs::{self},
-  path::PathBuf,
+  path::{Component, Path, PathBuf},
   sync::Arc,
   time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
-use tauri::{path::BaseDirectory, AppHandle, Manager};
+use tauri::{AppHandle, Manager};
 
 use crate::{
   app_settings::AppSettings,
@@ -71,12 +71,39 @@ impl PackInstaller {
       app_settings,
     };
 
-    // Install the starter widget pack if this is the first run.
-    if installer.app_settings.is_first_run {
+    // Install the starter widget pack on first run, and again whenever
+    // its files have gone missing. A config directory outlives the
+    // downloaded packs — migrating from an install that stored them under
+    // a different application name leaves the config in place but the
+    // packs unreachable — and without this the bar starts with no widgets.
+    if installer.app_settings.is_first_run
+      || !installer.is_starter_pack_installed()
+    {
       installer.install_starter_pack()?;
     }
 
     Ok(Arc::new(installer))
+  }
+
+  /// Whether the starter pack's files are present on disk.
+  ///
+  /// Metadata alone isn't enough to answer this: it records that a pack
+  /// was installed, not that its files are still where they were put.
+  fn is_starter_pack_installed(&self) -> bool {
+    let metadata_path = self
+      .app_settings
+      .marketplace_pack_metadata_path(STARTER_PACK_ID);
+
+    let Ok(metadata) = read_and_parse_json::<PackMetadata>(&metadata_path)
+    else {
+      return false;
+    };
+
+    self
+      .app_settings
+      .marketplace_pack_download_dir(STARTER_PACK_ID, &metadata.version)
+      .join("zpack.json")
+      .exists()
   }
 
   /// Returns a vector of `PackMetadata` instances for all installed packs.
@@ -111,30 +138,43 @@ impl PackInstaller {
 
   /// Locates the bundled `starter` pack resource.
   ///
-  /// Two layouts have to work. In a bundled app the resources sit above
-  /// the binary, which is what the first candidate covers. In a local
-  /// build the binary lives in the workspace's shared `target/` directory,
-  /// one level further out than it would in a standalone checkout, so the
-  /// pack is under `bar/`.
+  /// Two layouts have to work. When bundled, Tauri rewrites the leading
+  /// `..` of a resource glob into an `_up_` directory, so the pack lands
+  /// beneath the resource directory rather than above it. In a local build
+  /// the binary sits in the workspace's shared `target/` directory, one
+  /// level further out than a standalone checkout, so the pack is reached
+  /// by walking up to the repository root.
   fn starter_pack_dir(&self) -> anyhow::Result<PathBuf> {
-    let candidates =
-      ["../../resources/starter", "../../bar/resources/starter"];
+    let resource_dir = self
+      .app_handle
+      .path()
+      .resource_dir()
+      .context("Unable to resolve resource directory.")?;
+
+    let candidates = [
+      // Bundled.
+      "_up_/_up_/resources/starter",
+      "resources/starter",
+      // Local build.
+      "../../bar/resources/starter",
+      "../../resources/starter",
+    ];
+
+    let mut tried = Vec::new();
 
     for candidate in candidates {
-      let path = self
-        .app_handle
-        .path()
-        .resolve(candidate, BaseDirectory::Resource)
-        .context("Unable to resolve starter pack resource.")?;
+      let path = normalize_path(&resource_dir.join(candidate));
 
       if path.join("zpack.json").exists() {
         return Ok(path);
       }
+
+      tried.push(path.display().to_string());
     }
 
     anyhow::bail!(
       "Unable to locate the starter pack. Tried: {}.",
-      candidates.join(", ")
+      tried.join(", ")
     )
   }
 
@@ -168,5 +208,55 @@ impl PackInstaller {
     )?;
 
     Ok(())
+  }
+}
+
+/// Collapses `.` and `..` components without touching the filesystem.
+///
+/// Windows leaves `..` alone inside a verbatim (`\\?\`) path, which is what
+/// the resource directory can be, so a path built by joining `..` onto it
+/// never matches anything on disk. Resolving the components up front avoids
+/// that, and unlike `canonicalize` it works for a path that doesn't exist.
+fn normalize_path(path: &Path) -> PathBuf {
+  let mut normalized = PathBuf::new();
+
+  for component in path.components() {
+    match component {
+      Component::ParentDir => {
+        normalized.pop();
+      }
+      Component::CurDir => {}
+      component => normalized.push(component),
+    }
+  }
+
+  normalized
+}
+
+#[cfg(test)]
+mod tests {
+  use std::path::{Path, PathBuf};
+
+  use super::normalize_path;
+
+  #[test]
+  fn collapses_parent_components() {
+    assert_eq!(
+      normalize_path(Path::new("/a/b/c/../../d")),
+      PathBuf::from("/a/d")
+    );
+  }
+
+  #[test]
+  fn drops_current_dir_components() {
+    assert_eq!(
+      normalize_path(Path::new("/a/./b/./c")),
+      PathBuf::from("/a/b/c")
+    );
+  }
+
+  #[test]
+  fn leaves_a_plain_path_alone() {
+    assert_eq!(normalize_path(Path::new("/a/b/c")), PathBuf::from("/a/b/c"));
   }
 }

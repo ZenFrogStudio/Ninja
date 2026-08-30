@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
   app_settings::{AppSettingsValue, StartupConfig},
   common::{has_extension, read_and_parse_json},
+  pack_installer::STARTER_PACK_ID,
   widget_pack::{WidgetConfig, WidgetPackConfig},
 };
 
@@ -19,14 +20,16 @@ use crate::{
 enum ConfigMigration {
   V3_0_0StartupConfig,
   V3_0_0WidgetConfig,
+  NinjaStarterPack,
 }
 
 impl ConfigMigration {
   /// Returns an iterator over all config migrations.
   pub fn iter() -> Iter<'static, ConfigMigration> {
-    static MIGRATIONS: [ConfigMigration; 2] = [
+    static MIGRATIONS: [ConfigMigration; 3] = [
       ConfigMigration::V3_0_0StartupConfig,
       ConfigMigration::V3_0_0WidgetConfig,
+      ConfigMigration::NinjaStarterPack,
     ];
 
     MIGRATIONS.iter()
@@ -57,6 +60,9 @@ pub fn apply_config_migrations(
       }
       ConfigMigration::V3_0_0WidgetConfig => {
         migrate_widget_config(config_dir)?;
+      }
+      ConfigMigration::NinjaStarterPack => {
+        migrate_starter_pack(config_dir)?;
       }
     }
 
@@ -242,6 +248,78 @@ fn migrate_widget_config(config_dir: &Path) -> anyhow::Result<()> {
     tracing::info!(
       "Created pack config at: {}",
       pack_config_path.display()
+    );
+  }
+
+  Ok(())
+}
+
+/// Points startup configs at the renamed starter pack.
+///
+/// The fork renamed the bundled pack from `glzr-io.starter` to
+/// `ninja.starter`, and its window manager widget from `with-glazewm` to
+/// `with-ninja`. Settings written before the rename still name the old
+/// pack, which no longer resolves, so the bar starts with no widgets.
+///
+/// The old pack's marketplace metadata is dropped as well. Its files live
+/// under the previous application name and are never read again, so
+/// leaving the metadata behind would only list a pack that can't load.
+fn migrate_starter_pack(config_dir: &Path) -> anyhow::Result<()> {
+  const LEGACY_PACK_ID: &str = "glzr-io.starter";
+  const LEGACY_WIDGET_NAME: &str = "with-glazewm";
+  const WIDGET_NAME: &str = "with-ninja";
+
+  let legacy_metadata_path = config_dir
+    .join(".marketplace")
+    .join(format!("{}.json", LEGACY_PACK_ID));
+
+  if legacy_metadata_path.exists() {
+    fs::remove_file(&legacy_metadata_path).with_context(|| {
+      format!(
+        "Failed to remove stale pack metadata at: {}",
+        legacy_metadata_path.display()
+      )
+    })?;
+  }
+
+  let settings_path = config_dir.join("settings.json");
+
+  // Skip if the settings file does not exist.
+  if !settings_path.exists() {
+    return Ok(());
+  }
+
+  let mut settings = read_and_parse_json::<AppSettingsValue>(&settings_path)
+    .context("Failed to parse settings.json")?;
+
+  let mut is_changed = false;
+
+  for startup_config in &mut settings.startup_configs {
+    if startup_config.pack != LEGACY_PACK_ID {
+      continue;
+    }
+
+    startup_config.pack = STARTER_PACK_ID.to_string();
+    is_changed = true;
+
+    // Only the window manager widget was renamed; the pack's other
+    // widgets kept their names.
+    if startup_config.widget == LEGACY_WIDGET_NAME {
+      startup_config.widget = WIDGET_NAME.to_string();
+    }
+  }
+
+  if is_changed {
+    fs::write(
+      &settings_path,
+      serde_json::to_string_pretty(&settings)? + "\n",
+    )
+    .context("Failed to write migrated settings.")?;
+
+    tracing::info!(
+      "Migrated startup configs from '{}' to '{}'.",
+      LEGACY_PACK_ID,
+      STARTER_PACK_ID
     );
   }
 
