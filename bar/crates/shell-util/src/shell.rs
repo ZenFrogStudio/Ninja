@@ -44,7 +44,8 @@ impl Buffer {
   ///
   /// # Examples
   /// ```
-  /// use crate::shell::Buffer;
+  /// use shell_util::Buffer;
+  ///
   /// let mut buffer = Buffer::new(false);
   /// buffer.push(Buffer::Text("Hello".to_string())).unwrap();
   /// assert_eq!(buffer, Buffer::Text("Hello".to_string()));
@@ -173,12 +174,16 @@ impl Shell {
   ///
   /// ```rust,no_run
   /// use shell_util::{CommandOptions, Shell};
+  ///
+  /// # async fn example() {
   /// let output =
-  ///     Shell::exec("echo", &["Hello!"], &CommandOptions::default())
-  ///       .await
-  ///       .unwrap();
+  ///   Shell::exec("echo", ["Hello!"], &CommandOptions::default())
+  ///     .await
+  ///     .unwrap();
+  ///
   /// assert!(output.status.success);
   /// assert_eq!(output.stdout.as_str().unwrap(), "Hello!");
+  /// # }
   /// ```
   pub async fn exec<I, S>(
     program: &str,
@@ -223,11 +228,15 @@ impl Shell {
   /// # Examples
   /// ```rust,no_run
   /// use shell_util::{CommandOptions, Shell};
-  /// let status =
-  ///     Shell::status("echo", ["Hello!"], CommandOptions::default())
-  ///       .await
-  ///       .unwrap();
+  ///
+  /// # async fn example(shell: &Shell) {
+  /// let status = shell
+  ///   .status("echo", ["Hello!"], &CommandOptions::default())
+  ///   .await
+  ///   .unwrap();
+  ///
   /// assert!(status.success);
+  /// # }
   /// ```
   pub async fn status<I, S>(
     &self,
@@ -255,15 +264,19 @@ impl Shell {
   /// # Examples
   ///
   /// ```rust,no_run
-  /// use shell_util::{CommandEvent, Shell};
-  /// let child = Shell::spawn("yes", [], CommandOptions::default())
-  ///   .expect("Failed to spawn yes.");
+  /// use shell_util::{ChildProcessEvent, CommandOptions, Shell};
+  ///
+  /// # async fn example() {
+  /// let mut child =
+  ///   Shell::spawn("yes", [] as [&str; 0], &CommandOptions::default())
+  ///     .expect("Failed to spawn yes.");
   ///
   /// while let Some(event) = child.events().recv().await {
-  ///   if let CommandEvent::Stdout(buffer) = event {
+  ///   if let ChildProcessEvent::Stdout(buffer) = event {
   ///     println!("stdout: {}", buffer.as_str().unwrap());
   ///   }
   /// }
+  /// # }
   /// ```
   pub fn spawn<I, S>(
     program: &str,
