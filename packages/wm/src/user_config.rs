@@ -324,13 +324,11 @@ impl UserConfig {
     let inactive_configs =
       self.inactive_workspace_configs(active_workspaces);
 
+    let monitor_id = monitor.stable_id();
+    let monitor_index = monitor.index();
+
     inactive_configs.into_iter().find(|&config| {
-      config
-        .bind_to_monitor
-        .as_ref()
-        .is_some_and(|monitor_index| {
-          monitor.index() == *monitor_index as usize
-        })
+      config.matches_monitor(monitor_id.as_deref(), monitor_index)
     })
   }
 
@@ -345,7 +343,7 @@ impl UserConfig {
 
     inactive_configs
       .iter()
-      .find(|config| config.bind_to_monitor.is_none())
+      .find(|config| !config.is_bound())
       .or(inactive_configs.first())
       .copied()
   }
@@ -525,6 +523,24 @@ impl UserConfig {
         true
       }
     })
+  }
+}
+
+#[cfg(test)]
+impl UserConfig {
+  /// Creates a `UserConfig` for use in tests, without touching disk.
+  pub fn mock(workspaces: Vec<WorkspaceConfig>) -> Self {
+    let value = wm_common::ParsedConfig {
+      workspaces,
+      ..wm_common::ParsedConfig::default()
+    };
+
+    Self {
+      path: PathBuf::from("config.yaml"),
+      window_rules_by_event: Self::window_rules_by_event(&value),
+      value,
+      value_str: String::new(),
+    }
   }
 }
 

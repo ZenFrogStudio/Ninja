@@ -35,13 +35,14 @@ pub fn activate_workspace(
 
   let target_monitor = target_monitor
     .or_else(|| {
-      workspace_config
-        .bind_to_monitor
-        .and_then(|index| {
-          state
-            .monitors()
-            .into_iter()
-            .find(|monitor| monitor.index() == index as usize)
+      state
+        .monitors()
+        .into_iter()
+        .find(|monitor| {
+          workspace_config.matches_monitor(
+            monitor.stable_id().as_deref(),
+            monitor.index(),
+          )
         })
         .or_else(|| {
           state
@@ -109,6 +110,7 @@ fn workspace_config(
             name: workspace_name.to_string(),
             display_name: None,
             bind_to_monitor: None,
+            bind_to_monitor_id: None,
             keep_alive: false,
           })
       })

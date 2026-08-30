@@ -33,7 +33,18 @@ pub fn remove_monitor(
       workspace.has_children() || workspace.config().keep_alive
     });
 
+  let monitor_id = monitor.stable_id();
+
   for workspace in workspaces_to_move {
+    // Remember where the workspace came from, so it can be moved back if
+    // this monitor returns. Windows recycles monitor handles across a
+    // display wake, so a panel that never actually went away can end up
+    // here. Only set on the first displacement: a workspace pushed across
+    // two monitors in a row still belongs to the first one.
+    if workspace.origin_monitor_id().is_none() {
+      workspace.set_origin_monitor_id(monitor_id.clone());
+    }
+
     // Move workspace to target monitor.
     move_container_within_tree(
       &workspace.clone().into(),

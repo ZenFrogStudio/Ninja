@@ -3,7 +3,7 @@ use wm_common::try_warn;
 use crate::{
   commands::monitor::{
     add_monitor, move_bounded_workspaces_to_new_monitor, remove_monitor,
-    sort_monitors, update_monitor,
+    restore_workspaces_to_origin, sort_monitors, update_monitor,
   },
   models::{Monitor, NativeMonitorProperties},
   traits::{CommonGetters, PositionGetters, WindowGetters},
@@ -99,6 +99,11 @@ pub fn handle_display_settings_changed(
   for new_monitor in new_monitors {
     move_bounded_workspaces_to_new_monitor(&new_monitor, state, config)?;
   }
+
+  // Send workspaces displaced by an earlier teardown back to the monitor
+  // they came from, now that the bound ones have been placed. Covers
+  // monitors that were re-paired above as well as newly added ones.
+  restore_workspaces_to_origin(state, config)?;
 
   for window in state.windows() {
     // Display setting changes can spread windows out sporadically, so mark

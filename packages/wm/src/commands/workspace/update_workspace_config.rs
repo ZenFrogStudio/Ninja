@@ -37,6 +37,7 @@ pub fn update_workspace_config(
     bind_to_monitor: new_config
       .bind_to_monitor
       .or(current_config.bind_to_monitor),
+    bind_to_monitor_id: current_config.bind_to_monitor_id.clone(),
     keep_alive: new_config.keep_alive.unwrap_or(current_config.keep_alive),
   };
 

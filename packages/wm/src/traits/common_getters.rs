@@ -114,11 +114,21 @@ pub trait CommonGetters {
   }
 
   /// Children in order of last focus.
+  ///
+  /// Ids that no longer resolve to a child are skipped, so the focus order
+  /// can outlive a detached container without stalling the iterator.
   fn child_focus_order(&self) -> Box<dyn Iterator<Item = Container> + '_> {
     let child_focus_order = self.borrow_child_focus_order();
+    let mut index = 0;
 
     Box::new(std::iter::from_fn(move || {
-      for child_id in child_focus_order.iter() {
+      // Advancing `index` is what terminates the iterator. Re-scanning
+      // from the start each call would yield the same child forever,
+      // and callers that search for a specific kind of child (e.g.
+      // `child_in_direction`) would spin without ever reaching `None`.
+      while let Some(child_id) = child_focus_order.get(index) {
+        index += 1;
+
         if let Some(child) = self.child_by_id(child_id) {
           return Some(child);
         }
@@ -374,4 +384,69 @@ macro_rules! impl_common_getters {
       }
     }
   };
+}
+
+#[cfg(test)]
+mod tests {
+  use uuid::Uuid;
+
+  use super::CommonGetters;
+  use crate::models::{NonTilingWindow, TilingWindow, Workspace};
+
+  /// Moves a child to the front of its parent's focus order.
+  fn focus_first(workspace: &Workspace, child_id: Uuid) {
+    let mut focus_order = workspace.borrow_child_focus_order_mut();
+    focus_order.retain(|id| *id != child_id);
+    focus_order.push_front(child_id);
+  }
+
+  #[test]
+  fn visits_every_child_once_and_terminates() {
+    // The bug this guards: the iterator used to restart its scan on every
+    // call, yielding the first child forever and never reaching `None`.
+    let tiling = TilingWindow::mock().call();
+    let floating = NonTilingWindow::mock().call();
+
+    let workspace = Workspace::mock()
+      .tiling_containers(vec![tiling.clone().into()])
+      .non_tiling_windows(vec![floating.clone()])
+      .call();
+
+    focus_first(&workspace, floating.id());
+
+    let visited = workspace
+      .child_focus_order()
+      .map(|child| child.id())
+      .collect::<Vec<_>>();
+
+    assert_eq!(visited, vec![floating.id(), tiling.id()]);
+  }
+
+  #[test]
+  fn skips_ids_that_no_longer_resolve() {
+    let tiling = TilingWindow::mock().call();
+
+    let workspace = Workspace::mock()
+      .tiling_containers(vec![tiling.clone().into()])
+      .call();
+
+    // A stale id, as left behind by a detached child.
+    workspace
+      .borrow_child_focus_order_mut()
+      .push_front(Uuid::new_v4());
+
+    let visited = workspace
+      .child_focus_order()
+      .map(|child| child.id())
+      .collect::<Vec<_>>();
+
+    assert_eq!(visited, vec![tiling.id()]);
+  }
+
+  #[test]
+  fn is_empty_without_children() {
+    let workspace = Workspace::mock().call();
+
+    assert_eq!(workspace.child_focus_order().count(), 0);
+  }
 }

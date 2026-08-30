@@ -32,6 +32,7 @@ struct WorkspaceInner {
   config: WorkspaceConfig,
   gaps_config: GapsConfig,
   tiling_direction: TilingDirection,
+  origin_monitor_id: Option<String>,
 }
 
 impl Workspace {
@@ -48,6 +49,7 @@ impl Workspace {
       config,
       gaps_config,
       tiling_direction,
+      origin_monitor_id: None,
     };
 
     Self(Rc::new(RefCell::new(workspace)))
@@ -61,6 +63,24 @@ impl Workspace {
   /// Update the underlying config for the workspace.
   pub fn set_config(&self, config: WorkspaceConfig) {
     self.0.borrow_mut().config = config;
+  }
+
+  /// Stable id of the monitor this workspace was displaced from.
+  ///
+  /// Set when a monitor is torn down and its workspaces are moved
+  /// elsewhere, so they can go back once that monitor returns. Held in
+  /// memory only: a workspace that outlives the session is placed by its
+  /// config instead.
+  pub fn origin_monitor_id(&self) -> Option<String> {
+    self.0.borrow().origin_monitor_id.clone()
+  }
+
+  /// Records the monitor this workspace was displaced from.
+  ///
+  /// Pass `None` once it has been restored, or when the user moves the
+  /// workspace themselves and the origin no longer applies.
+  pub fn set_origin_monitor_id(&self, monitor_id: Option<String>) {
+    self.0.borrow_mut().origin_monitor_id = monitor_id;
   }
 
   /// Whether the workspace is currently displayed by the parent monitor.

@@ -70,3 +70,54 @@ macro_rules! impl_tiling_direction_getters {
     }
   };
 }
+
+#[cfg(test)]
+mod tests {
+  use wm_common::TilingDirection;
+  use wm_platform::Direction;
+
+  use super::TilingDirectionGetters;
+  use crate::{
+    models::{NonTilingWindow, TilingWindow, Workspace},
+    traits::CommonGetters,
+  };
+
+  #[test]
+  fn cross_axis_skips_a_non_tiling_child() {
+    // The bug this guards: searching the focus order for a tiling child
+    // used to spin forever when the most recently focused child was a
+    // floating, minimized, or fullscreen window, hanging the WM.
+    let tiling = TilingWindow::mock().call();
+    let floating = NonTilingWindow::mock().call();
+
+    let workspace = Workspace::mock()
+      .tiling_direction(TilingDirection::Horizontal)
+      .tiling_containers(vec![tiling.clone().into()])
+      .non_tiling_windows(vec![floating.clone()])
+      .call();
+
+    // Put the floating window at the head of the focus order.
+    let mut focus_order = workspace.borrow_child_focus_order_mut();
+    focus_order.retain(|id| *id != floating.id());
+    focus_order.push_front(floating.id());
+    drop(focus_order);
+
+    // `Up` is the cross axis of a horizontal workspace, which is what
+    // sends the search down the focus order.
+    let target = workspace.child_in_direction(&Direction::Up);
+
+    assert_eq!(target.map(|child| child.id()), Some(tiling.id()));
+  }
+
+  #[test]
+  fn cross_axis_is_none_without_a_tiling_child() {
+    let floating = NonTilingWindow::mock().call();
+
+    let workspace = Workspace::mock()
+      .tiling_direction(TilingDirection::Horizontal)
+      .non_tiling_windows(vec![floating])
+      .call();
+
+    assert!(workspace.child_in_direction(&Direction::Up).is_none());
+  }
+}
