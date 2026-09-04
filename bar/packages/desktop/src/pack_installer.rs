@@ -213,10 +213,11 @@ impl PackInstaller {
 
 /// Collapses `.` and `..` components without touching the filesystem.
 ///
-/// Windows leaves `..` alone inside a verbatim (`\\?\`) path, which is what
-/// the resource directory can be, so a path built by joining `..` onto it
-/// never matches anything on disk. Resolving the components up front avoids
-/// that, and unlike `canonicalize` it works for a path that doesn't exist.
+/// Windows leaves `..` alone inside a verbatim (`\\?\`) path, which is
+/// what the resource directory can be, so a path built by joining `..`
+/// onto it never matches anything on disk. Resolving the components up
+/// front avoids that, and unlike `canonicalize` it works for a path that
+/// doesn't exist.
 fn normalize_path(path: &Path) -> PathBuf {
   let mut normalized = PathBuf::new();
 
@@ -257,6 +258,9 @@ mod tests {
 
   #[test]
   fn leaves_a_plain_path_alone() {
-    assert_eq!(normalize_path(Path::new("/a/b/c")), PathBuf::from("/a/b/c"));
+    assert_eq!(
+      normalize_path(Path::new("/a/b/c")),
+      PathBuf::from("/a/b/c")
+    );
   }
 }

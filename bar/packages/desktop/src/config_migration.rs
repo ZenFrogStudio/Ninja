@@ -289,8 +289,9 @@ fn migrate_starter_pack(config_dir: &Path) -> anyhow::Result<()> {
     return Ok(());
   }
 
-  let mut settings = read_and_parse_json::<AppSettingsValue>(&settings_path)
-    .context("Failed to parse settings.json")?;
+  let mut settings =
+    read_and_parse_json::<AppSettingsValue>(&settings_path)
+      .context("Failed to parse settings.json")?;
 
   let mut is_changed = false;
 
