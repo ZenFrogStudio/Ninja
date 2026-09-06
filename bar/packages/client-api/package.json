@@ -23,7 +23,8 @@
     "build": "tsup",
     "dev": "pnpm build --watch src",
     "dev:local": "pnpm dev",
-    "prepublishOnly": "pnpm build"
+    "prepublishOnly": "pnpm build",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@tauri-apps/api": "2.0.2",
