@@ -832,6 +832,21 @@ impl WidgetPackManager {
       )
       .await?;
 
+    // Remove the widget's files only once the config write has succeeded,
+    // so a failed write cannot orphan them. A hand-edited pack may have
+    // no directory for an entry, so a missing directory is not an error.
+    let widget_dir = pack.directory_path.join(widget_name);
+    ensure_direct_child(&widget_dir, &pack.directory_path)?;
+
+    if widget_dir.is_dir() {
+      fs::remove_dir_all(&widget_dir).with_context(|| {
+        format!(
+          "Failed to remove widget directory '{}'.",
+          widget_dir.display()
+        )
+      })?;
+    }
+
     Ok(())
   }
 }
