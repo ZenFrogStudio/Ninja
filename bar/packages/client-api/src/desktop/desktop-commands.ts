@@ -242,13 +242,12 @@ export interface ShellExecOutput<
  * Invoke a Tauri command with logging and error handling.
  */
 async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> {
-  logger.info(`Calling '${command}' with args:`, args ?? {});
+  // Only the command name is logged. Arguments and responses can carry
+  // shell environment variables, stdin buffers and process output.
+  logger.info(`Calling '${command}'.`);
 
   try {
-    const response = await tauriInvoke<T>(command, args);
-    logger.info(`Response for calling '${command}':`, response);
-
-    return response;
+    return await tauriInvoke<T>(command, args);
   } catch (err) {
     logger.error(`Command '${command}' failed: ${err}`);
     throw new Error(`Command '${command}' failed: ${err}`);
