@@ -27,7 +27,11 @@ export function WidgetCachingSubform(props: WidgetCachingSubformProps) {
   createEffect(
     on(
       () => props.value,
-      value => cachingForm.setValue(value),
+      value => {
+        if (value) {
+          cachingForm.setValue(value);
+        }
+      },
     ),
   );
 
@@ -181,7 +185,11 @@ function CacheDurationField(props: CacheDurationFieldProps) {
     }
   }
 
-  function toDuration(value: SelectOptions) {
+  // Duration in seconds for a preset option. Custom durations come from
+  // the number field instead.
+  function toDuration(
+    value: Exclude<SelectOptions, SelectOptions.Custom>,
+  ): number {
     switch (value) {
       case SelectOptions.OneHour:
         return 60 * 60;
@@ -191,8 +199,6 @@ function CacheDurationField(props: CacheDurationFieldProps) {
         return 7 * 24 * 60 * 60;
       case SelectOptions.NoCache:
         return 0;
-      case SelectOptions.Custom:
-        return customValue();
     }
   }
 

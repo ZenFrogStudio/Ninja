@@ -28,8 +28,11 @@ export function createAudioProvider(
         } else {
           queue.output({
             ...result.output,
-            setVolume: (volume: number, options?: SetVolumeOptions) => {
-              return desktopCommands.callProviderFunction(configHash, {
+            setVolume: async (
+              volume: number,
+              options?: SetVolumeOptions,
+            ) => {
+              await desktopCommands.callProviderFunction(configHash, {
                 type: 'audio',
                 function: {
                   name: 'set_volume',
@@ -37,8 +40,8 @@ export function createAudioProvider(
                 },
               });
             },
-            setMute: (mute: boolean, options?: SetMuteOptions) => {
-              return desktopCommands.callProviderFunction(configHash, {
+            setMute: async (mute: boolean, options?: SetMuteOptions) => {
+              await desktopCommands.callProviderFunction(configHash, {
                 type: 'audio',
                 function: {
                   name: 'set_mute',

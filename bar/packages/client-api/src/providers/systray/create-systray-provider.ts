@@ -61,8 +61,8 @@ export function createSystrayProvider(
                 iconUrl: cachedIcon.iconUrl,
               };
             }),
-            onHoverEnter: (iconId: string) => {
-              return desktopCommands.callProviderFunction(configHash, {
+            onHoverEnter: async (iconId: string) => {
+              await desktopCommands.callProviderFunction(configHash, {
                 type: 'systray',
                 function: {
                   name: 'icon_hover_enter',
@@ -70,8 +70,8 @@ export function createSystrayProvider(
                 },
               });
             },
-            onHoverLeave: (iconId: string) => {
-              return desktopCommands.callProviderFunction(configHash, {
+            onHoverLeave: async (iconId: string) => {
+              await desktopCommands.callProviderFunction(configHash, {
                 type: 'systray',
                 function: {
                   name: 'icon_hover_leave',
@@ -79,8 +79,8 @@ export function createSystrayProvider(
                 },
               });
             },
-            onHoverMove: (iconId: string) => {
-              return desktopCommands.callProviderFunction(configHash, {
+            onHoverMove: async (iconId: string) => {
+              await desktopCommands.callProviderFunction(configHash, {
                 type: 'systray',
                 function: {
                   name: 'icon_hover_move',
@@ -88,8 +88,8 @@ export function createSystrayProvider(
                 },
               });
             },
-            onLeftClick: (iconId: string) => {
-              return desktopCommands.callProviderFunction(configHash, {
+            onLeftClick: async (iconId: string) => {
+              await desktopCommands.callProviderFunction(configHash, {
                 type: 'systray',
                 function: {
                   name: 'icon_left_click',
@@ -97,8 +97,8 @@ export function createSystrayProvider(
                 },
               });
             },
-            onLeftDoubleClick: (iconId: string) => {
-              return desktopCommands.callProviderFunction(configHash, {
+            onLeftDoubleClick: async (iconId: string) => {
+              await desktopCommands.callProviderFunction(configHash, {
                 type: 'systray',
                 function: {
                   name: 'icon_left_double_click',
@@ -106,8 +106,8 @@ export function createSystrayProvider(
                 },
               });
             },
-            onRightClick: (iconId: string) => {
-              return desktopCommands.callProviderFunction(configHash, {
+            onRightClick: async (iconId: string) => {
+              await desktopCommands.callProviderFunction(configHash, {
                 type: 'systray',
                 function: {
                   name: 'icon_right_click',
@@ -115,8 +115,8 @@ export function createSystrayProvider(
                 },
               });
             },
-            onMiddleClick: (iconId: string) => {
-              return desktopCommands.callProviderFunction(configHash, {
+            onMiddleClick: async (iconId: string) => {
+              await desktopCommands.callProviderFunction(configHash, {
                 type: 'systray',
                 function: {
                   name: 'icon_middle_click',

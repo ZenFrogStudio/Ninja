@@ -25,12 +25,12 @@ export function ImageSelector(props: ImageSelectorProps) {
     });
 
     if (selectedPaths) {
-      props.onChange([...props.images, ...selectedPaths]);
+      props.onChange?.([...props.images, ...selectedPaths]);
     }
   }
 
   function removeImage(index: number) {
-    props.onChange(props.images.filter((_, i) => i !== index));
+    props.onChange?.(props.images.filter((_, i) => i !== index));
   }
 
   return (

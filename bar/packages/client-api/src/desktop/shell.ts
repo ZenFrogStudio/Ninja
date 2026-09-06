@@ -3,6 +3,7 @@ import {
   desktopCommands,
   type ShellCommandOptions,
   type ShellExecOutput,
+  type ShellExitStatus,
 } from './desktop-commands';
 
 interface ShellEmission {
@@ -25,10 +26,7 @@ type ShellEvent<T extends string | Uint8Array = string> =
     }
   | {
       type: 'terminated';
-      data: {
-        exitCode: number | null;
-        signal: number | null;
-      };
+      data: ShellExitStatus;
     };
 
 /**
@@ -95,10 +93,7 @@ export async function shellSpawn<
   const stdoutCallbacks: ((data: TOutput) => void)[] = [];
   const stderrCallbacks: ((data: TOutput) => void)[] = [];
   const errorCallbacks: ((data: string) => void)[] = [];
-  const exitCallbacks: ((data: {
-    exitCode: number | null;
-    signal: number | null;
-  }) => void)[] = [];
+  const exitCallbacks: ((data: ShellExitStatus) => void)[] = [];
 
   const unlistenEvents = await listen(
     'shell-emit',
@@ -145,12 +140,7 @@ export interface ShellProcess<
   processId: number;
   onStdout: (callback: (line: TOutput) => void) => void;
   onStderr: (callback: (line: TOutput) => void) => void;
-  onExit: (
-    callback: (status: {
-      exitCode: number | null;
-      signal: number | null;
-    }) => void,
-  ) => void;
+  onExit: (callback: (status: ShellExitStatus) => void) => void;
   kill: () => void;
   write: (data: string | Uint8Array) => void;
 }
