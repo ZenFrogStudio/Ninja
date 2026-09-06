@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.3.3 - 2026-09-06
+
+### Security
+
+- A widget can no longer write to or kill a process spawned by another
+  widget. `shellWrite` and `shellKill` now check that the calling widget
+  owns the process and reject anything else.
+
+### Fixed
+
+- Quoted shell-exec commands (for example `"C:\Program Files\App\app.exe"
+  --flag`) failed with "command doesn't have an ending quote". The parser
+  now stops at the closing quote.
+- Widget pack and widget names are validated before they are used as
+  directory names, and the create-pack dialog shows a field error for an
+  invalid name instead of a raw error string.
+- Deleting a widget now removes its files from disk, not just the config
+  entry.
+- The client API types now match what the bar returns: the `ninja` provider
+  function and systray double-click are typed, `runCommand` returns the
+  documented `{ subjectContainerId }` object, and the shell `onExit` status
+  is `{ code, success, signal }` rather than `{ exitCode, signal }`.
+- The bar no longer logs every command's arguments and response to the
+  widget console. Only the command name is logged.
+
+### Changed
+
+- Client API package `ninja` bumped to 3.1.0.
+- `pnpm run typecheck` runs `tsc --noEmit` for `client-api` and
+  `settings-ui`. Prettier now ignores build output and generated schemas.
+
 ## 0.3.1 — 2026-08-30
 
 ### Fixed
