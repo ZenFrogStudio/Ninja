@@ -289,19 +289,25 @@ pub async fn shell_spawn(
 pub async fn shell_write(
   pid: shell_util::ProcessId,
   buffer: shell_util::Buffer,
+  window: Window,
   shell_state: State<'_, ShellState>,
 ) -> anyhow::Result<(), String> {
+  let widget_id = window.label();
   shell_state
-    .write(pid, buffer)
+    .write(widget_id, pid, buffer)
     .map_err(|err| err.to_string())
 }
 
 #[tauri::command]
 pub async fn shell_kill(
   pid: shell_util::ProcessId,
+  window: Window,
   shell_state: State<'_, ShellState>,
 ) -> anyhow::Result<(), String> {
-  shell_state.kill(pid).map_err(|err| err.to_string())
+  let widget_id = window.label();
+  shell_state
+    .kill(widget_id, pid)
+    .map_err(|err| err.to_string())
 }
 
 #[tauri::command]
