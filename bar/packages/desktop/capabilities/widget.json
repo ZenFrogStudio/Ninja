@@ -2,9 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "widget",
   "description": "Widget capabilities",
-  "windows": [
-    "widget-*"
-  ],
+  "windows": ["widget-*"],
   "remote": {
     "urls": [
       "http://asset.localhost",
