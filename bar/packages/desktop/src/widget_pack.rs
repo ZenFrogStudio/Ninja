@@ -595,7 +595,10 @@ impl WidgetPackManager {
     &self,
     args: CreateWidgetPackArgs,
   ) -> anyhow::Result<WidgetPack> {
+    validate_pack_name(&args.name)?;
+
     let pack_dir = self.app_settings.config_dir.join(&args.name);
+    ensure_direct_child(&pack_dir, &self.app_settings.config_dir)?;
 
     let mut context = tera::Context::new();
     context.insert("PACK_NAME", &args.name);
@@ -725,8 +728,11 @@ impl WidgetPackManager {
     &self,
     args: CreateWidgetConfigArgs,
   ) -> anyhow::Result<WidgetConfig> {
+    validate_pack_name(&args.name)?;
+
     let pack = self.find_custom_widget_pack(&args.pack_id).await?;
     let widget_dir = pack.directory_path.join(&args.name);
+    ensure_direct_child(&widget_dir, &pack.directory_path)?;
 
     let template_path = match args.template {
       FrontendTemplate::ReactBuildless => {
@@ -830,6 +836,58 @@ impl WidgetPackManager {
   }
 }
 
+/// Validates a widget pack or widget name.
+///
+/// Mirrors the `name` schema in the client API: 2 to 28 characters,
+/// lowercase letters, digits, `-` and `_`, starting with a letter or
+/// digit. Names are joined into file paths, so this is what keeps them
+/// from escaping the config directory.
+fn validate_pack_name(name: &str) -> anyhow::Result<()> {
+  let char_count = name.chars().count();
+
+  if !(2..=28).contains(&char_count) {
+    anyhow::bail!("Name must be between 2 and 28 characters.");
+  }
+
+  let mut chars = name.chars();
+  let first_is_valid = chars
+    .next()
+    .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+  let rest_is_valid = chars.all(|c| {
+    c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_'
+  });
+
+  if !first_is_valid || !rest_is_valid {
+    anyhow::bail!(
+      "Only lowercase letters, numbers, and the characters - and _ are allowed."
+    );
+  }
+
+  Ok(())
+}
+
+/// Errors unless `path` is a direct child of `base`.
+///
+/// Boundary check for directories derived from user-supplied names. Name
+/// validation should make this unreachable, but nothing is written or
+/// deleted without it.
+fn ensure_direct_child(path: &Path, base: &Path) -> anyhow::Result<()> {
+  let last_is_normal = matches!(
+    path.components().next_back(),
+    Some(std::path::Component::Normal(_))
+  );
+
+  if path.parent() != Some(base) || !last_is_normal {
+    anyhow::bail!(
+      "Path '{}' is not inside '{}'.",
+      path.display(),
+      base.display()
+    );
+  }
+
+  Ok(())
+}
+
 /// Helper function for setting a default value for a boolean field.
 const fn default_bool<const V: bool>() -> bool {
   V
@@ -839,4 +897,45 @@ const fn default_bool<const V: bool>() -> bool {
 /// `WidgetPreset::name` field.
 fn default_preset_name() -> String {
   "default".into()
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn accepts_valid_names() {
+    for name in ["my-pack", "a1", "pack_2", "0abc", &"a".repeat(28)] {
+      assert!(validate_pack_name(name).is_ok(), "{name}");
+    }
+  }
+
+  #[test]
+  fn rejects_invalid_names() {
+    for name in [
+      "",
+      "a",
+      &"a".repeat(29),
+      "My-Pack",
+      "-pack",
+      "_pack",
+      "..",
+      "../etc",
+      "a/b",
+      "a\\b",
+      "a b",
+      "a.b",
+    ] {
+      assert!(validate_pack_name(name).is_err(), "{name}");
+    }
+  }
+
+  #[test]
+  fn direct_child_check() {
+    let base = Path::new("/base");
+    assert!(ensure_direct_child(&base.join("pack"), base).is_ok());
+    assert!(ensure_direct_child(&base.join("a").join("b"), base).is_err());
+    assert!(ensure_direct_child(&base.join(".."), base).is_err());
+    assert!(ensure_direct_child(base, base).is_err());
+  }
 }

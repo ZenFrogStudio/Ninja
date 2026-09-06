@@ -28,10 +28,13 @@ export interface CreateWidgetPackDialogProps {
 export function CreateWidgetPackDialog(
   props: CreateWidgetPackDialogProps,
 ) {
-  const packForm = createForm<CreateWidgetPackDialogFormData>({
-    name: '',
-    description: '',
-  });
+  const packForm = createForm<CreateWidgetPackDialogFormData>(
+    {
+      name: '',
+      description: '',
+    },
+    { schema: formSchema },
+  );
 
   function onSubmit(e: Event) {
     if (!packForm.isDirty() || packForm.hasError()) {
