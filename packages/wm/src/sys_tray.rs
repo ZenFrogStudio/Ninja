@@ -18,6 +18,8 @@ use tray_icon::{
 use wm_platform::DispatcherExtWindows;
 use wm_platform::{Dispatcher, ThreadBound};
 
+use crate::BarRequest;
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 enum TrayMenuId {
   Settings,
@@ -80,6 +82,7 @@ impl SystemTray {
   pub fn new(
     config_path: &Path,
     dispatcher: Dispatcher,
+    bar_request_tx: Option<mpsc::UnboundedSender<BarRequest>>,
   ) -> anyhow::Result<Self> {
     let (exit_tx, exit_rx) = mpsc::unbounded_channel();
     let (config_reload_tx, config_reload_rx) = mpsc::unbounded_channel();
@@ -127,6 +130,7 @@ impl SystemTray {
             &exit_tx,
             &animations_enabled,
             &run_on_startup_enabled,
+            bar_request_tx.as_ref(),
           ) {
             tracing::warn!("Failed to handle tray menu event: {}", err);
           }
@@ -286,6 +290,7 @@ impl SystemTray {
     )?)
   }
 
+  #[allow(clippy::too_many_arguments)]
   fn handle_menu_event(
     menu_id: &TrayMenuId,
     dispatcher: &Dispatcher,
@@ -296,20 +301,35 @@ impl SystemTray {
     #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
     animations_enabled: &Arc<Mutex<bool>>,
     run_on_startup_enabled: &Arc<Mutex<bool>>,
+    bar_request_tx: Option<&mpsc::UnboundedSender<BarRequest>>,
   ) -> anyhow::Result<()> {
     tracing::info!("Processing tray menu event: {:?}", menu_id);
 
     match menu_id {
-      // The bar runs as its own process. Invoking its binary forwards the
-      // command to the already-running instance via its single-instance
-      // handler, so there's no second IPC channel to maintain.
-      // Both settings pages live in the bar's window, which is the only
-      // GUI surface in the product.
-      TrayMenuId::Settings => {
-        Self::run_bar_command_with_args(&["settings", "--page", "wm"])
-      }
-      TrayMenuId::BarSettings => Self::run_bar_command("settings"),
-      TrayMenuId::ReloadBar => Self::run_bar_command("reload-widgets"),
+      // A bar hosted in this process is asked over `bar_request_tx`.
+      // Otherwise, this is the standalone WM, and the bar (if any) is a
+      // separate process reached by re-invoking its binary, which its
+      // single-instance handler forwards to the running instance.
+      TrayMenuId::Settings => match bar_request_tx {
+        Some(tx) => tx
+          .send(BarRequest::OpenWmSettings)
+          .context("Bar request channel is closed."),
+        None => {
+          Self::run_bar_command_with_args(&["settings", "--page", "wm"])
+        }
+      },
+      TrayMenuId::BarSettings => match bar_request_tx {
+        Some(tx) => tx
+          .send(BarRequest::OpenSettings)
+          .context("Bar request channel is closed."),
+        None => Self::run_bar_command("settings"),
+      },
+      TrayMenuId::ReloadBar => match bar_request_tx {
+        Some(tx) => tx
+          .send(BarRequest::ReloadWidgets)
+          .context("Bar request channel is closed."),
+        None => Self::run_bar_command("reload-widgets"),
+      },
       TrayMenuId::ShowConfigFolder => {
         dispatcher.open_file_explorer({
           #[cfg(target_os = "windows")]

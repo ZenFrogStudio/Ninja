@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Changed
+
+- The tray's Settings, Widgets and Reload bar items now talk to the bar
+  directly instead of launching a second `ninja.exe` to forward the
+  request.
+
 ### Security
 
 - Widgets can no longer run `shell-exec` through the `ninja` provider's

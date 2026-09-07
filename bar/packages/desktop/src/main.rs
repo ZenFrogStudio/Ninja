@@ -125,6 +125,7 @@ async fn main() -> anyhow::Result<()> {
             wm_config_path,
             wm_verbosity,
             app.handle().clone(),
+            app.state::<Arc<WidgetFactory>>().inner().clone(),
           )?;
 
           Ok(())
@@ -491,6 +492,10 @@ async fn open_widgets_by_cli_command(
 /// error — the whole app follows it out, so that the two halves can't be
 /// left half-running.
 ///
+/// Also spawns a task that answers the WM tray's "Settings", "Widgets" and
+/// "Reload bar" requests directly, so those menu items don't have to spawn
+/// a second copy of this executable to reach the bar.
+///
 /// # Platform-specific
 ///
 /// - **Windows**: Hosts the window manager in this process.
@@ -500,6 +505,7 @@ fn start_window_manager(
   config_path: Option<PathBuf>,
   verbosity: Verbosity,
   app_handle: AppHandle,
+  widget_factory: Arc<WidgetFactory>,
 ) -> anyhow::Result<()> {
   // The event loop is built on its own thread rather than handed to it.
   // Its message window belongs to whichever thread creates it, and
@@ -535,6 +541,38 @@ fn start_window_manager(
       anyhow::anyhow!("Failed to start the WM event loop: {err}")
     })?;
 
+  // Carries the tray's "Settings", "Widgets" and "Reload bar" requests to
+  // the bar sharing this process, in place of spawning a second copy of
+  // the executable to reach it.
+  let (bar_request_tx, mut bar_request_rx) =
+    mpsc::unbounded_channel::<wm::BarRequest>();
+
+  task::spawn({
+    let app_handle = app_handle.clone();
+
+    async move {
+      while let Some(request) = bar_request_rx.recv().await {
+        let res = match request {
+          wm::BarRequest::OpenSettings => SysTray::open_settings_window(
+            &app_handle,
+            SettingsRoute::Index,
+          ),
+          wm::BarRequest::OpenWmSettings => SysTray::open_settings_window(
+            &app_handle,
+            SettingsRoute::WindowManager,
+          ),
+          wm::BarRequest::ReloadWidgets => {
+            widget_factory.relaunch_all().await
+          }
+        };
+
+        if let Err(err) = res {
+          error!("Failed to handle bar request: {:?}", err);
+        }
+      }
+    }
+  });
+
   // The WM gets a thread of its own too, rather than a task. Its
   // container tree is built on `Rc<RefCell<..>>`, so the future isn't
   // `Send` and can't live on the multi-threaded runtime — `block_on`
@@ -547,8 +585,13 @@ fn start_window_manager(
     let _event_loop_guard = wm::EventLoopGuard(dispatcher.clone());
 
     runtime.block_on(async {
-      if let Err(err) =
-        wm::start_wm(config_path, verbosity, &dispatcher).await
+      if let Err(err) = wm::start_wm(
+        config_path,
+        verbosity,
+        &dispatcher,
+        Some(bar_request_tx),
+      )
+      .await
       {
         error!("Window manager exited with an error: {:?}", err);
         dispatcher.show_error_dialog("Fatal error", &err.to_string());
