@@ -27,6 +27,8 @@
 ### Removed
 
 - The unused `start_preview_widget` and `stop_all_preview_widgets` commands.
+- The bar's unused tray menu code. The window manager's tray is the only
+  one.
 
 ## 0.3.3 - 2026-09-06
 

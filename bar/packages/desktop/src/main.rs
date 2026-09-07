@@ -30,8 +30,8 @@ use crate::{
   monitor_state::MonitorState,
   pack_installer::PackInstaller,
   providers::{ProviderEmission, ProviderManager},
+  settings_window::{open_settings_window, SettingsRoute},
   shell_state::ShellState,
-  sys_tray::{SettingsRoute, SysTray},
   widget_factory::{WidgetFactory, WidgetOpenOptions},
   widget_pack::{MonitorSelection, WidgetPackManager, WidgetPlacement},
 };
@@ -45,8 +45,8 @@ mod config_migration;
 mod monitor_state;
 mod pack_installer;
 mod providers;
+mod settings_window;
 mod shell_state;
-mod sys_tray;
 mod widget_factory;
 mod widget_pack;
 mod wm_settings;
@@ -279,22 +279,11 @@ async fn start_app(app: &mut tauri::App, cli: Cli) -> anyhow::Result<()> {
   // Open widgets based on CLI command.
   open_widgets_by_cli_command(cli, widget_factory.clone()).await?;
 
-  // Add application icon to system tray.
-  let tray = SysTray::new(
-    app.handle(),
-    app_settings.clone(),
-    widget_pack_manager.clone(),
-    widget_factory.clone(),
-  )
-  .await?;
-
   listen_events(
     app.handle(),
-    app_settings,
     widget_pack_manager,
     monitor_state,
     widget_factory,
-    tray,
     manager,
     emit_rx,
   );
@@ -307,49 +296,33 @@ async fn start_app(app: &mut tauri::App, cli: Cli) -> anyhow::Result<()> {
 }
 
 /// Listens for events and updates state accordingly.
-#[allow(clippy::too_many_arguments)]
 fn listen_events(
   app_handle: &AppHandle,
-  app_settings: Arc<AppSettings>,
   widget_pack_manager: Arc<WidgetPackManager>,
   monitor_state: Arc<MonitorState>,
   widget_factory: Arc<WidgetFactory>,
-  tray: SysTray,
   manager: Arc<ProviderManager>,
   mut emit_rx: mpsc::UnboundedReceiver<ProviderEmission>,
 ) {
   let app_handle = app_handle.clone();
   let mut widget_open_rx = widget_factory.open_tx.subscribe();
   let mut widget_close_rx = widget_factory.close_tx.subscribe();
-  let mut settings_change_rx = app_settings.settings_change_tx.subscribe();
   let mut monitors_change_rx = monitor_state.change_tx.subscribe();
   let mut widget_configs_change_rx =
     widget_pack_manager.widget_configs_change_tx.subscribe();
-  let mut widget_packs_change_rx =
-    widget_pack_manager.widget_packs_change_tx.subscribe();
 
   task::spawn(async move {
     loop {
       let res = tokio::select! {
         Ok(widget_state) = widget_open_rx.recv() => {
           info!("Widget opened.");
-          let _ = tray.refresh().await;
           let _ = app_handle.emit("widget-opened", widget_state);
           Ok(())
         },
         Ok(widget_id) = widget_close_rx.recv() => {
           info!("Widget closed.");
-          let _ = tray.refresh().await;
           let _ = app_handle.emit("widget-closed", widget_id);
           Ok(())
-        },
-        Ok(_) = settings_change_rx.recv() => {
-          info!("Settings changed.");
-          tray.refresh().await
-        },
-        Ok(_) = widget_packs_change_rx.recv() => {
-          info!("Widget packs changed.");
-          tray.refresh().await
         },
         Ok(monitors) = monitors_change_rx.recv() => {
           info!("Monitors changed: {} monitor(s).", monitors.len());
@@ -406,7 +379,7 @@ fn setup_single_instance(
             CliCommand::Empty => Ok(()),
             // Driven by the window manager's tray, so that both halves of
             // the product are controlled from a single menu.
-            CliCommand::Settings(args) => SysTray::open_settings_window(
+            CliCommand::Settings(args) => open_settings_window(
               &app_handle,
               match args.page.as_deref() {
                 Some("wm") => SettingsRoute::WindowManager,
@@ -553,14 +526,12 @@ fn start_window_manager(
     async move {
       while let Some(request) = bar_request_rx.recv().await {
         let res = match request {
-          wm::BarRequest::OpenSettings => SysTray::open_settings_window(
-            &app_handle,
-            SettingsRoute::Index,
-          ),
-          wm::BarRequest::OpenWmSettings => SysTray::open_settings_window(
-            &app_handle,
-            SettingsRoute::WindowManager,
-          ),
+          wm::BarRequest::OpenSettings => {
+            open_settings_window(&app_handle, SettingsRoute::Index)
+          }
+          wm::BarRequest::OpenWmSettings => {
+            open_settings_window(&app_handle, SettingsRoute::WindowManager)
+          }
           wm::BarRequest::ReloadWidgets => {
             widget_factory.relaunch_all().await
           }

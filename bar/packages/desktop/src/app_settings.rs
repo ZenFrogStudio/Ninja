@@ -61,9 +61,6 @@ pub struct AppSettings {
   /// Directory where downloaded marketplace widget packs are stored.
   pub marketplace_download_dir: PathBuf,
 
-  /// Path to the config migration file.
-  pub migration_file: PathBuf,
-
   /// Parsed app settings value.
   pub value: Arc<Mutex<AppSettingsValue>>,
 
@@ -117,26 +114,10 @@ impl AppSettings {
       marketplace_meta_dir: marketplace_meta_dir.canonicalize_pretty()?,
       marketplace_download_dir: marketplace_download_dir
         .canonicalize_pretty()?,
-      migration_file,
       value: Arc::new(Mutex::new(settings)),
       _settings_change_rx,
       settings_change_tx,
     })
-  }
-
-  /// Re-evaluates app settings and broadcasts the change.
-  pub async fn reload(&self) -> anyhow::Result<()> {
-    let (new_settings, _) =
-      Self::read_settings_or_init(&self.config_dir, &self.migration_file)?;
-
-    {
-      let mut settings = self.value.lock().await;
-      *settings = new_settings.clone();
-    }
-
-    self.settings_change_tx.send(new_settings)?;
-
-    Ok(())
   }
 
   /// Reads the app settings file or initializes it with the template.
@@ -221,29 +202,6 @@ impl AppSettings {
     self.value.lock().await.startup_configs.clone()
   }
 
-  /// Adds the given config to be launched on startup.
-  pub async fn add_startup_config(
-    &self,
-    pack_id: &str,
-    widget_name: &str,
-    preset_name: &str,
-  ) -> anyhow::Result<()> {
-    let mut new_settings = { self.value.lock().await.clone() };
-
-    let startup_config = StartupConfig {
-      pack: pack_id.to_string(),
-      widget: widget_name.to_string(),
-      preset: preset_name.to_string(),
-    };
-
-    if new_settings.startup_configs.contains(&startup_config) {
-      return Ok(());
-    }
-
-    new_settings.startup_configs.push(startup_config);
-    self.write_settings(new_settings).await
-  }
-
   /// Removes startup configs matching the given criteria.
   ///
   /// Matches `pack_id` and optionally `widget_name` and `preset_name`.
@@ -263,33 +221,6 @@ impl AppSettings {
     });
 
     self.write_settings(new_settings).await
-  }
-
-  /// Opens the config directory in the OS-dependent file explorer.
-  pub fn open_config_dir(&self) -> anyhow::Result<()> {
-    #[cfg(target_os = "windows")]
-    {
-      std::process::Command::new("explorer")
-        .arg(self.config_dir.clone())
-        .spawn()?;
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-      std::process::Command::new("open")
-        .arg(self.config_dir.clone())
-        .arg("-R")
-        .spawn()?;
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-      std::process::Command::new("xdg-open")
-        .arg(self.config_dir.clone())
-        .spawn()?;
-    }
-
-    Ok(())
   }
 
   /// Copies and processes a template to the destination directory.

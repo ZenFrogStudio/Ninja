@@ -377,21 +377,6 @@ impl WidgetPackManager {
     })
   }
 
-  /// Re-evaluates widget packs within the config directory.
-  pub async fn reload(&self) -> anyhow::Result<()> {
-    let new_widget_packs =
-      Self::read_widget_packs(&self.app_settings, &self.pack_installer)?;
-
-    {
-      let mut widget_packs = self.widget_packs.lock().await;
-      *widget_packs = new_widget_packs.clone();
-    }
-
-    self.widget_packs_change_tx.send(new_widget_packs)?;
-
-    Ok(())
-  }
-
   /// Reads all widget packs from:
   ///  - The user's config directory.
   ///  - The marketplace directory.

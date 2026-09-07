@@ -849,21 +849,6 @@ impl WidgetFactory {
     self.relaunch_by_ids(&widget_ids).await
   }
 
-  /// Clears the cache for all open widgets.
-  pub fn clear_cache(&self) {
-    for (_, window) in self.app_handle.webview_windows() {
-      // Post a message to the service worker for clearing the cache.
-      _ = window.eval(
-        r"
-        if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.ready.then(sw => {
-            sw.active?.postMessage({ type: 'CLEAR_CACHE' });
-          });
-        }",
-      );
-    }
-  }
-
   /// Returns widget states by their widget ID's.
   pub async fn states(&self) -> HashMap<String, WidgetState> {
     self.widget_states.lock().await.clone()
