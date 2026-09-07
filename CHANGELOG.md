@@ -6,6 +6,9 @@
 
 - Widgets can no longer run `shell-exec` through the `ninja` provider's
   `runCommand`. Use `shellExec` with a `shellCommands` privilege.
+- Shell privileges now resolve the program to an absolute path with the
+  bar's own `PATH` before checking, and a widget-supplied `PATH` is
+  ignored.
 
 ### Removed
 

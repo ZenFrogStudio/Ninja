@@ -54,6 +54,7 @@ wm-ipc-client = { path = "../../../packages/wm-ipc-client" }
 wm = { path = "../../../packages/wm" }
 wm-cli = { path = "../../../packages/wm-cli" }
 wm-platform = { path = "../../../packages/wm-platform" }
+which = "8"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 systray-util = { path = "../../crates/systray-util" }

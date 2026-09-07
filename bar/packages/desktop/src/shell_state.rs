@@ -1,5 +1,6 @@
 use std::{
   collections::{hash_map::Entry, HashMap},
+  path::PathBuf,
   sync::{Arc, Mutex},
 };
 
@@ -176,12 +177,19 @@ impl ShellState {
     args: ShellCommandArgs,
     options: &CommandOptions,
   ) -> anyhow::Result<ShellExecOutput> {
-    self
+    let resolved_program = self
       .check_shell_privilege(widget_id, program, args.clone())
       .await?;
 
+    let resolved_program =
+      resolved_program.to_str().with_context(|| {
+        format!("Path to program '{program}' is not valid UTF-8.")
+      })?;
+
     let args_vec: Vec<String> = args.into();
-    let output = Shell::exec(program, &args_vec, options).await?;
+    let options = without_path_override(options);
+    let output =
+      Shell::exec(resolved_program, &args_vec, &options).await?;
 
     Ok(output)
   }
@@ -197,12 +205,18 @@ impl ShellState {
     args: ShellCommandArgs,
     options: &CommandOptions,
   ) -> anyhow::Result<ProcessId> {
-    self
+    let resolved_program = self
       .check_shell_privilege(widget_id, program, args.clone())
       .await?;
 
+    let resolved_program =
+      resolved_program.to_str().with_context(|| {
+        format!("Path to program '{program}' is not valid UTF-8.")
+      })?;
+
     let args_vec: Vec<String> = args.into();
-    let mut child = Shell::spawn(program, &args_vec, options)?;
+    let options = without_path_override(options);
+    let mut child = Shell::spawn(resolved_program, &args_vec, &options)?;
     let app_handle = self.app_handle.clone();
     let owner_widget_id = widget_id.to_string();
     let widget_id = widget_id.to_string();
@@ -282,13 +296,18 @@ impl ShellState {
   /// Validates whether a widget has privilege to execute a program with
   /// given arguments.
   ///
-  /// Returns an error if widget does not have privilege.
+  /// Resolves `program` to an absolute path using the bar's own `PATH`
+  /// before matching it against the widget's privileges, so a widget
+  /// cannot smuggle in its own binary under a trusted program name.
+  ///
+  /// Returns the resolved path if the widget has privilege, or an error
+  /// otherwise.
   async fn check_shell_privilege(
     &self,
     widget_id: &str,
     program: &str,
     args: ShellCommandArgs,
-  ) -> anyhow::Result<()> {
+  ) -> anyhow::Result<PathBuf> {
     let widget = self
       .widget_factory
       .state_by_id(widget_id)
@@ -297,13 +316,21 @@ impl ShellState {
         format!("Widget with ID '{widget_id}' not found.")
       })?;
 
+    let resolved_program = resolve_program(program)?;
+
     let args_str: String = args.into();
     let shell_privileges = widget.config.privileges.shell_commands;
 
-    // Check if any privilege matches the program.
+    // Check if any privilege matches the resolved program, either by raw
+    // name (the common case) or by resolving the privilege's own program
+    // to the same absolute path (for privileges written as a full path).
     let program_privileges: Vec<_> = shell_privileges
       .iter()
-      .filter(|privilege| privilege.program == program)
+      .filter(|privilege| {
+        privilege.program == program
+          || resolve_program(&privilege.program).ok().as_deref()
+            == Some(resolved_program.as_path())
+      })
       .collect();
 
     if program_privileges.is_empty() {
@@ -314,7 +341,7 @@ impl ShellState {
       // Allow empty args if args regex is also empty.
       if privilege.args_regex.is_empty() {
         if args_str.is_empty() {
-          return Ok(());
+          return Ok(resolved_program);
         }
 
         continue;
@@ -323,7 +350,7 @@ impl ShellState {
       // Check if args match the regex pattern.
       if let Ok(re) = regex::Regex::new(&privilege.args_regex) {
         if re.is_match(&args_str) {
-          return Ok(());
+          return Ok(resolved_program);
         }
       }
     }
@@ -334,6 +361,36 @@ impl ShellState {
       program
     )
   }
+}
+
+/// Resolves `program` to the executable that will actually run, using this
+/// process's own `PATH` and never anything a widget supplied.
+fn resolve_program(program: &str) -> anyhow::Result<PathBuf> {
+  which::which(program)
+    .with_context(|| format!("Could not resolve program '{program}'."))
+}
+
+/// Drops a widget-supplied `PATH` override. Program lookup already uses
+/// the resolved absolute path, so this only closes the door on tools the
+/// program itself launches.
+fn without_path_override(options: &CommandOptions) -> CommandOptions {
+  let mut options = options.clone();
+
+  let path_keys: Vec<String> = options
+    .env
+    .keys()
+    .filter(|key| key.eq_ignore_ascii_case("path"))
+    .cloned()
+    .collect();
+
+  for key in path_keys {
+    options.env.remove(&key);
+    tracing::debug!(
+      "Removed widget-supplied PATH override '{key}' before spawn."
+    );
+  }
+
+  options
 }
 
 impl Drop for ShellState {
@@ -429,5 +486,38 @@ mod tests {
       .write("widget-a", 99, Buffer::Text("hi".into()))
       .is_ok());
     assert!(table.kill("widget-a", 99).is_ok());
+  }
+
+  #[test]
+  fn path_override_is_stripped() {
+    let mut options = CommandOptions::default();
+    options.env.insert("PATH".to_string(), "evil".to_string());
+    options.env.insert("Path".to_string(), "evil".to_string());
+    options.env.insert("path".to_string(), "evil".to_string());
+    options
+      .env
+      .insert("OTHER_VAR".to_string(), "keep-me".to_string());
+
+    let sanitized = without_path_override(&options);
+
+    assert!(!sanitized.env.contains_key("PATH"));
+    assert!(!sanitized.env.contains_key("Path"));
+    assert!(!sanitized.env.contains_key("path"));
+    assert_eq!(
+      sanitized.env.get("OTHER_VAR"),
+      Some(&"keep-me".to_string())
+    );
+  }
+
+  #[cfg(windows)]
+  #[test]
+  fn resolves_program_on_path() {
+    let resolved = resolve_program("cmd").expect("cmd should be on PATH");
+
+    assert!(resolved.is_absolute());
+    assert!(resolved
+      .to_string_lossy()
+      .to_lowercase()
+      .ends_with("cmd.exe"));
   }
 }
