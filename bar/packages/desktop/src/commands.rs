@@ -196,34 +196,6 @@ pub async fn call_provider_function(
     .map_err(|err| err.to_string())
 }
 
-#[tauri::command]
-pub async fn start_preview_widget(
-  pack_config: WidgetPack,
-  widget_name: String,
-  preset_name: String,
-  widget_factory: State<'_, Arc<WidgetFactory>>,
-) -> anyhow::Result<(), String> {
-  widget_factory
-    .start_widget_by_pack(
-      &pack_config,
-      &widget_name,
-      &WidgetOpenOptions::Preset(preset_name),
-      true,
-    )
-    .await
-    .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-pub async fn stop_all_preview_widgets(
-  widget_factory: State<'_, Arc<WidgetFactory>>,
-) -> anyhow::Result<(), String> {
-  widget_factory
-    .stop_all_previews()
-    .await
-    .map_err(|err| err.to_string())
-}
-
 /// Tauri's implementation of `always_on_top` places the window above
 /// all normal windows (but not the MacOS menu bar). The following instead
 /// sets the z-order of the window to be above the menu bar.

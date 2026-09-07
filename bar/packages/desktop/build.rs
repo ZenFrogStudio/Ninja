@@ -21,8 +21,6 @@ fn main() {
     "listen_provider",
     "unlisten_provider",
     "call_provider_function",
-    "start_preview_widget",
-    "stop_all_preview_widgets",
     "set_always_on_top",
     "set_skip_taskbar",
     "shell_exec",

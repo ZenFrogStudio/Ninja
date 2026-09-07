@@ -148,8 +148,6 @@ async fn main() -> anyhow::Result<()> {
       commands::write_wm_settings,
       commands::unlisten_provider,
       commands::call_provider_function,
-      commands::start_preview_widget,
-      commands::stop_all_preview_widgets,
       commands::set_always_on_top,
       commands::set_skip_taskbar,
       commands::shell_exec,

@@ -7,6 +7,10 @@
 - Widgets can no longer run `shell-exec` through the `ninja` provider's
   `runCommand`. Use `shellExec` with a `shellCommands` privilege.
 
+### Removed
+
+- The unused `start_preview_widget` and `stop_all_preview_widgets` commands.
+
 ## 0.3.3 - 2026-09-06
 
 ### Security
