@@ -23,6 +23,8 @@
 
 - Processes started with `shellSpawn` are forgotten when they exit
   instead of being held until the bar closes.
+- A fatal error while the bar starts now shows an error dialog instead of
+  exiting silently.
 
 ### Removed
 

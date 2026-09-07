@@ -100,10 +100,12 @@ async fn main() -> anyhow::Result<()> {
               let start_res = start_app(app, cli).await;
 
               // If unable to start Ninja, the error is fatal and a message
-              // dialog is shown.
+              // dialog is shown. Release builds run without a console, so
+              // without this a user whose bar fails to start would see
+              // nothing at all.
               if let Err(err) = &start_res {
-                // TODO: Show error dialog.
                 error!("{:?}", err);
+                show_fatal_error_dialog(app.handle(), err);
               };
 
               start_res
@@ -202,8 +204,44 @@ fn output_query(app: &tauri::App, args: QueryArgs) -> anyhow::Result<()> {
   }
 }
 
+/// Shows a blocking error dialog for a fatal startup failure.
+///
+/// The dialog plugin is registered as the first statement of `start_app`,
+/// so it is normally available even when startup fails later. But if
+/// registering the plugin is itself what failed, reaching it here would
+/// panic - caught so the caller's error is still what gets returned instead
+/// of being replaced by a panic.
+fn show_fatal_error_dialog(app_handle: &AppHandle, err: &anyhow::Error) {
+  use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+
+  let app_handle = app_handle.clone();
+  let message = format!("{err:#}");
+
+  // `AppHandle` isn't `UnwindSafe`, but the closure only reads it to
+  // display a dialog - nothing here can leave shared state inconsistent
+  // if it unwinds.
+  let dialog_res =
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+      app_handle
+        .dialog()
+        .message(message)
+        .title("Ninja failed to start")
+        .kind(MessageDialogKind::Error)
+        .blocking_show();
+    }));
+
+  if dialog_res.is_err() {
+    error!("Failed to show the startup error dialog.");
+  }
+}
+
 /// Starts Ninja - either with a specific widget or all widgets.
 async fn start_app(app: &mut tauri::App, cli: Cli) -> anyhow::Result<()> {
+  // Registered first, before anything else that can fail, so a fatal
+  // startup error further down always has a dialog plugin available to
+  // report through.
+  app.handle().plugin(tauri_plugin_dialog::init())?;
+
   // Runs before anything reads config, so a machine upgrading from the
   // pre-rename build starts with its existing settings rather than
   // defaults.
@@ -269,7 +307,6 @@ async fn start_app(app: &mut tauri::App, cli: Cli) -> anyhow::Result<()> {
   }
 
   app.manage(ShellState::new(app.handle(), widget_factory.clone()));
-  app.handle().plugin(tauri_plugin_dialog::init())?;
   app.handle().plugin(tauri_plugin_shell::init())?;
 
   // Initialize `ProviderManager` in Tauri state.
