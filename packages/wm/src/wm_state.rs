@@ -1,4 +1,6 @@
 use std::time::Instant;
+#[cfg(target_os = "windows")]
+use std::{collections::HashMap, time::Duration};
 
 use anyhow::Context;
 use tokio::sync::mpsc::{self};
@@ -9,7 +11,7 @@ use wm_platform::{
   Direction, Dispatcher, Display, NativeWindow, Point, Rect,
 };
 #[cfg(target_os = "windows")]
-use wm_platform::{NativeWindowWindowsExt, OpacityValue};
+use wm_platform::{NativeWindowWindowsExt, OpacityValue, WindowId};
 
 use crate::{
   commands::{
@@ -35,6 +37,11 @@ pub struct WmState {
   pub dispatcher: Dispatcher,
 
   pub pending_sync: PendingSync,
+
+  /// Native frames requested by Ninja that may still emit asynchronous
+  /// location-change events.
+  #[cfg(target_os = "windows")]
+  expected_native_frames: HashMap<WindowId, (Rect, Instant)>,
 
   /// Name of the most recently focused workspace.
   ///
@@ -87,6 +94,8 @@ impl WmState {
       root_container: RootContainer::new(),
       dispatcher,
       pending_sync: PendingSync::default(),
+      #[cfg(target_os = "windows")]
+      expected_native_frames: HashMap::new(),
       prev_effects_window: None,
       recent_workspace_name: None,
       unmanaged_or_minimized_timestamp: None,
@@ -661,6 +670,47 @@ impl WmState {
       .cloned()
   }
 
+  #[cfg(target_os = "windows")]
+  pub fn expect_native_frame(&mut self, window_id: WindowId, frame: Rect) {
+    const TIMEOUT: Duration = Duration::from_secs(1);
+
+    self
+      .expected_native_frames
+      .retain(|_, (_, requested_at)| requested_at.elapsed() <= TIMEOUT);
+    self
+      .expected_native_frames
+      .insert(window_id, (frame, Instant::now()));
+  }
+
+  #[cfg(target_os = "windows")]
+  pub fn clear_expected_native_frame(&mut self, window_id: WindowId) {
+    self.expected_native_frames.remove(&window_id);
+  }
+
+  #[cfg(target_os = "windows")]
+  pub fn is_expected_native_frame_event(
+    &mut self,
+    window_id: WindowId,
+    frame: &Rect,
+  ) -> bool {
+    const TIMEOUT: Duration = Duration::from_secs(1);
+
+    let Some((expected_frame, requested_at)) =
+      self.expected_native_frames.get(&window_id)
+    else {
+      return false;
+    };
+
+    let is_expired = requested_at.elapsed() > TIMEOUT;
+    let reached_expected_frame = expected_frame == frame;
+
+    if is_expired || reached_expected_frame {
+      self.expected_native_frames.remove(&window_id);
+    }
+
+    !is_expired
+  }
+
   /// Cleans up windows that are no longer alive.
   ///
   /// This addresses the "ghost window" issue where applications may
@@ -795,5 +845,49 @@ impl Drop for WmState {
     // Backstop. A clean exit restores windows in `WindowManager::cleanup`,
     // while the watchdog's safety net is still armed.
     self.restore_windows();
+  }
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod tests {
+  use tokio::sync::mpsc;
+  use wm_platform::{Dispatcher, Rect, WindowId};
+
+  use super::WmState;
+
+  #[test]
+  fn suppresses_programmatic_frame_events_until_target_is_reached() {
+    let (event_tx, _event_rx) = mpsc::unbounded_channel();
+    let (exit_tx, _exit_rx) = mpsc::unbounded_channel();
+    let mut state = WmState::new(Dispatcher::mock(), event_tx, exit_tx);
+    let window_id = WindowId(42);
+    let intermediate_frame = Rect::from_xy(0, 0, 500, 500);
+    let target_frame = Rect::from_xy(0, 0, 1000, 1000);
+
+    state.expect_native_frame(window_id, target_frame.clone());
+
+    assert!(
+      state.is_expected_native_frame_event(window_id, &intermediate_frame)
+    );
+    assert!(state.is_expected_native_frame_event(window_id, &target_frame));
+    assert!(
+      !state.is_expected_native_frame_event(window_id, &target_frame)
+    );
+  }
+
+  #[test]
+  fn interactive_drag_can_clear_programmatic_frame_suppression() {
+    let (event_tx, _event_rx) = mpsc::unbounded_channel();
+    let (exit_tx, _exit_rx) = mpsc::unbounded_channel();
+    let mut state = WmState::new(Dispatcher::mock(), event_tx, exit_tx);
+    let window_id = WindowId(42);
+    let target_frame = Rect::from_xy(0, 0, 1000, 1000);
+
+    state.expect_native_frame(window_id, target_frame.clone());
+    state.clear_expected_native_frame(window_id);
+
+    assert!(
+      !state.is_expected_native_frame_event(window_id, &target_frame)
+    );
   }
 }

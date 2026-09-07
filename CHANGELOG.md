@@ -31,6 +31,20 @@
 - `pnpm run typecheck` runs `tsc --noEmit` for `client-api` and
   `settings-ui`. Prettier now ignores build output and generated schemas.
 
+## 0.3.2 - 2026-09-06
+
+### Fixed
+
+- Window drops at a shared monitor edge now resolve to exactly one monitor,
+  preventing intermittent placement on the adjacent display.
+- Window redraw events initiated by Ninja no longer feed back into drag and
+  workspace state while another window is being repositioned.
+- Tiling resize proportions can no longer become non-finite when every sibling
+  is at its minimum size. Existing invalid proportions are repaired on the next
+  resize instead of leaving windows at a fraction of their allotted area.
+- Windows dragged from a tiled layout are classified at drag start and remain
+  tiled when Windows Aero Snap maximizes them before the drop event arrives.
+
 ## 0.3.1 — 2026-08-30
 
 ### Fixed

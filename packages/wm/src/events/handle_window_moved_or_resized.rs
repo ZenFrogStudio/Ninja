@@ -3,11 +3,11 @@ use wm_common::{
   try_warn, ActiveDrag, ActiveDragOperation, DisplayState,
   FloatingStateConfig, FullscreenStateConfig, HideMethod, WindowState,
 };
-#[cfg(target_os = "windows")]
-use wm_platform::NativeWindowWindowsExt;
 #[cfg(target_os = "macos")]
 use wm_platform::{LengthValue, MouseButton, RectDelta};
 use wm_platform::{NativeWindow, Rect};
+#[cfg(target_os = "windows")]
+use wm_platform::{NativeWindowWindowsExt, Point};
 
 use crate::{
   commands::{
@@ -39,6 +39,31 @@ pub fn handle_window_moved_or_resized(
     let old_frame_position = window.native_properties().frame;
     let frame_position = try_warn!(window.native().frame());
 
+    #[cfg(target_os = "windows")]
+    {
+      let window_id = window.native().id();
+
+      if is_interactive_start
+        || is_interactive_end
+        || window.active_drag().is_some()
+      {
+        state.clear_expected_native_frame(window_id);
+      } else if state
+        .is_expected_native_frame_event(window_id, &frame_position)
+      {
+        let is_maximized = try_warn!(window.native().is_maximized());
+        window.update_native_properties(|properties| {
+          properties.frame = frame_position;
+          properties.is_maximized = is_maximized;
+        });
+
+        tracing::debug!(
+          "Ignoring location event caused by Ninja redraw: {window}"
+        );
+        return Ok(());
+      }
+    }
+
     window.update_native_properties(|properties| {
       properties.frame = frame_position.clone();
     });
@@ -67,7 +92,15 @@ pub fn handle_window_moved_or_resized(
       };
 
       if is_drag_end {
-        return handle_window_moved_or_resized_end(&window, state, config);
+        update_drag_state(&window, &frame_position, state, config)?;
+
+        let updated_window =
+          state.window_from_native(native_window).unwrap_or(window);
+        return handle_window_moved_or_resized_end(
+          &updated_window,
+          state,
+          config,
+        );
       }
 
       return update_drag_state(&window, &frame_position, state, config);
@@ -171,6 +204,24 @@ pub fn handle_window_moved_or_resized(
       tracing::info!("Window started dragging: {window}");
 
       window.set_active_drag(Some(ActiveDrag {
+        #[cfg(target_os = "windows")]
+        operation: Some(
+          if matches!(
+            window.state(),
+            WindowState::Fullscreen(FullscreenStateConfig {
+              maximized: true,
+              ..
+            })
+          ) {
+            ActiveDragOperation::Move
+          } else {
+            drag_operation_at_point(
+              &state.dispatcher.cursor_position()?,
+              &old_frame_position,
+            )
+          },
+        ),
+        #[cfg(target_os = "macos")]
         operation: None,
         is_from_floating: matches!(
           window.state(),
@@ -512,6 +563,30 @@ fn update_drag_state(
   Ok(())
 }
 
+#[cfg(target_os = "windows")]
+fn drag_operation_at_point(
+  cursor_position: &Point,
+  window_frame: &Rect,
+) -> ActiveDragOperation {
+  const RESIZE_BORDER_PX: i32 = 8;
+
+  let distance_to_horizontal_edge = (cursor_position.x
+    - window_frame.left)
+    .abs()
+    .min((cursor_position.x - window_frame.right).abs());
+  let distance_to_vertical_edge = (cursor_position.y - window_frame.top)
+    .abs()
+    .min((cursor_position.y - window_frame.bottom).abs());
+
+  if distance_to_horizontal_edge <= RESIZE_BORDER_PX
+    || distance_to_vertical_edge <= RESIZE_BORDER_PX
+  {
+    ActiveDragOperation::Resize
+  } else {
+    ActiveDragOperation::Move
+  }
+}
+
 /// Gets whether the window is in the corner of the monitor.
 fn is_in_corner(window_frame: &Rect, monitor_rect: &Rect) -> bool {
   // Visible portion of the window used when positioning windows in the
@@ -541,8 +616,14 @@ fn is_in_corner(window_frame: &Rect, monitor_rect: &Rect) -> bool {
 
 #[cfg(test)]
 mod tests {
+  #[cfg(target_os = "windows")]
+  use wm_common::ActiveDragOperation;
+  #[cfg(target_os = "windows")]
+  use wm_platform::Point;
   use wm_platform::Rect;
 
+  #[cfg(target_os = "windows")]
+  use super::drag_operation_at_point;
   use super::is_in_corner;
 
   #[test]
@@ -562,5 +643,20 @@ mod tests {
     let frame = Rect::from_xy(100, 100, 800, 600);
 
     assert!(!is_in_corner(&frame, &monitor));
+  }
+
+  #[cfg(target_os = "windows")]
+  #[test]
+  fn classifies_drag_from_cursor_position_before_frame_changes() {
+    let frame = Rect::from_xy(100, 100, 800, 600);
+
+    assert_eq!(
+      drag_operation_at_point(&Point { x: 400, y: 120 }, &frame),
+      ActiveDragOperation::Move
+    );
+    assert_eq!(
+      drag_operation_at_point(&Point { x: 899, y: 400 }, &frame),
+      ActiveDragOperation::Resize
+    );
   }
 }

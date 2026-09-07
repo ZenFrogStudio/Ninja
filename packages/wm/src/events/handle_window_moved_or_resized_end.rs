@@ -56,7 +56,11 @@ pub fn handle_window_moved_or_resized_end(
           .context("No workspace.")?,
       )?;
 
-      if is_maximized || should_fullscreen {
+      if should_keep_native_snap(
+        active_drag.is_from_floating,
+        is_maximized,
+        should_fullscreen,
+      ) {
         let fullscreen_state = if let WindowState::Fullscreen(
           fullscreen_state,
         ) = window.state()
@@ -144,6 +148,14 @@ pub fn handle_window_moved_or_resized_end(
   }
 
   Ok(())
+}
+
+fn should_keep_native_snap(
+  is_from_floating: bool,
+  is_maximized: bool,
+  should_fullscreen: bool,
+) -> bool {
+  is_from_floating && (is_maximized || should_fullscreen)
 }
 
 /// Handles transition from temporary floating window to tiling window on
@@ -282,6 +294,22 @@ fn drop_as_tiling_window(
   state.pending_sync.queue_container_to_redraw(target_parent);
 
   Ok(moved_window)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::should_keep_native_snap;
+
+  #[test]
+  fn native_snap_does_not_override_a_tiling_drop() {
+    assert!(!should_keep_native_snap(false, true, true));
+  }
+
+  #[test]
+  fn floating_windows_keep_native_snap_behavior() {
+    assert!(should_keep_native_snap(true, true, false));
+    assert!(should_keep_native_snap(true, false, true));
+  }
 }
 
 /// Represents where the window was dropped over another.

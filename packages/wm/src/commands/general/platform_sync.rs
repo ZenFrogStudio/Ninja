@@ -285,9 +285,14 @@ fn redraw_containers(
       DisplayState::Showing | DisplayState::Shown
     );
 
-    if let Err(err) =
-      reposition_window(window, *hide_corner, &z_order, is_visible, config)
-    {
+    if let Err(err) = reposition_window(
+      window,
+      *hide_corner,
+      &z_order,
+      is_visible,
+      state,
+      config,
+    ) {
       tracing::warn!("Failed to set window position: {}", err);
     }
 
@@ -342,6 +347,8 @@ fn reposition_window(
   #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
   z_order: &WindowZOrder,
   is_visible: bool,
+  #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
+  state: &mut WmState,
   config: &UserConfig,
 ) -> anyhow::Result<()> {
   let rect = window
@@ -444,6 +451,7 @@ fn reposition_window(
         }
         _ => {
           swp_flags |= SWP_FRAMECHANGED;
+          state.expect_native_frame(window.native().id(), rect.clone());
 
           window.native().set_window_pos(z_order, &rect, swp_flags)?;
 
