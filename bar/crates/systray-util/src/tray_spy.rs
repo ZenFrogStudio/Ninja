@@ -583,7 +583,8 @@ impl TraySpy {
     };
 
     if msg > WM_USER {
-      unsafe { PostMessageW(HWND(real_tray as _), msg, wparam, lparam) };
+      let _ =
+        unsafe { PostMessageW(HWND(real_tray as _), msg, wparam, lparam) };
       unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
     } else {
       unsafe { SendMessageW(HWND(real_tray as _), msg, wparam, lparam) }

@@ -776,7 +776,7 @@ impl WidgetFactory {
 
   /// Relaunches all currently open widgets.
   pub async fn relaunch_all(&self) -> anyhow::Result<()> {
-    let widget_ids =
+    let widget_ids: Vec<String> =
       { self.widget_states.lock().await.keys().cloned().collect() };
 
     self.relaunch_by_ids(&widget_ids).await
@@ -785,7 +785,7 @@ impl WidgetFactory {
   /// Relaunches widgets with the given widget ID's.
   pub async fn relaunch_by_ids(
     &self,
-    widget_ids: &Vec<String>,
+    widget_ids: &[String],
   ) -> anyhow::Result<()> {
     let changed_states = {
       let mut widget_states = self.widget_states.lock().await;

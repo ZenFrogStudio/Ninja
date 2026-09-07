@@ -326,7 +326,7 @@ mod tests {
     match thread.join().unwrap() {
       Some(display) => assert!(display.is_ok()),
       None => {
-        eprintln!("No visible windows; skipping nearest display check.")
+        eprintln!("No visible windows; skipping nearest display check.");
       }
     }
   }

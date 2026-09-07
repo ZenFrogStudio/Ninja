@@ -9,6 +9,8 @@
   request.
 - Updated `sysinfo`, removing one duplicate copy of the `windows` crate
   from the build.
+- CI now runs the Rust test suite, and clippy warnings in the bar fail
+  the build like they do for the window manager.
 
 ### Security
 
