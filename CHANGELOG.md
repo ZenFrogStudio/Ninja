@@ -13,6 +13,11 @@
   argument string. Patterns that relied on matching a substring need
   anchoring removed, e.g. `status` becomes `.*status.*`.
 
+### Fixed
+
+- Processes started with `shellSpawn` are forgotten when they exit
+  instead of being held until the bar closes.
+
 ### Removed
 
 - The unused `start_preview_widget` and `stop_all_preview_widgets` commands.

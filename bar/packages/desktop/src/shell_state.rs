@@ -1,7 +1,7 @@
 use std::{
   collections::{hash_map::Entry, HashMap},
   path::PathBuf,
-  sync::{Arc, Mutex},
+  sync::{Arc, Mutex, MutexGuard},
 };
 
 use anyhow::{bail, Context};
@@ -23,7 +23,6 @@ pub struct ProcessHandle {
   owner_widget_id: String,
   write_tx: mpsc::UnboundedSender<Buffer>,
   kill_tx: oneshot::Sender<()>,
-  _event_task: tokio::task::JoinHandle<()>,
 }
 
 impl ProcessHandle {
@@ -105,6 +104,12 @@ impl ProcessTable {
     for (_, child) in self.children.drain() {
       let _ = child.kill_tx.send(());
     }
+  }
+
+  /// Forgets a process without signaling it, for use when it has already
+  /// exited on its own.
+  fn remove(&mut self, pid: ProcessId) {
+    self.children.remove(&pid);
   }
 }
 
@@ -226,16 +231,42 @@ impl ShellState {
     let (write_tx, mut write_rx) = mpsc::unbounded_channel::<Buffer>();
     let (kill_tx, mut kill_rx) = oneshot::channel();
 
+    // Insert the handle before the event task starts, so the table always
+    // has an entry for a PID that a widget might already be interacting
+    // with by the time the first event arrives.
+    self.table()?.insert(
+      pid,
+      ProcessHandle {
+        owner_widget_id,
+        write_tx,
+        kill_tx,
+      },
+    );
+
+    let children = self.children.clone();
+
     // Set up event handling.
-    let event_task = tokio::spawn(async move {
+    tokio::spawn(async move {
       loop {
         tokio::select! {
           // Process events from the child.
           Some(event) = child.events().recv() => {
+            let is_terminal = matches!(
+              event,
+              ChildProcessEvent::Terminated(_) | ChildProcessEvent::Error(_)
+            );
+
             let _ = app_handle.emit_to(widget_id.clone(), "shell-emit", ShellEmission {
               pid,
               event,
             });
+
+            if is_terminal {
+              if let Ok(mut table) = children.lock() {
+                table.remove(pid);
+              }
+              break;
+            }
           }
 
           // Process write requests.
@@ -257,16 +288,6 @@ impl ShellState {
       }
     });
 
-    self.children.lock().unwrap().insert(
-      pid,
-      ProcessHandle {
-        owner_widget_id,
-        write_tx,
-        kill_tx,
-        _event_task: event_task,
-      },
-    );
-
     Ok(pid)
   }
 
@@ -279,7 +300,7 @@ impl ShellState {
     pid: ProcessId,
     buffer: Buffer,
   ) -> anyhow::Result<()> {
-    self.children.lock().unwrap().write(widget_id, pid, buffer)
+    self.table()?.write(widget_id, pid, buffer)
   }
 
   /// Terminates a running process.
@@ -290,7 +311,15 @@ impl ShellState {
     widget_id: &str,
     pid: ProcessId,
   ) -> anyhow::Result<()> {
-    self.children.lock().unwrap().kill(widget_id, pid)
+    self.table()?.kill(widget_id, pid)
+  }
+
+  /// Locks the process table, turning a poisoned lock into an error.
+  fn table(&self) -> anyhow::Result<MutexGuard<'_, ProcessTable>> {
+    self
+      .children
+      .lock()
+      .map_err(|_| anyhow::anyhow!("Process table lock was poisoned."))
   }
 
   /// Validates whether a widget has privilege to execute a program with
@@ -410,7 +439,9 @@ fn without_path_override(options: &CommandOptions) -> CommandOptions {
 
 impl Drop for ShellState {
   fn drop(&mut self) {
-    self.children.lock().unwrap().kill_all();
+    if let Ok(mut table) = self.children.lock() {
+      table.kill_all();
+    }
   }
 }
 
@@ -434,7 +465,6 @@ mod tests {
         owner_widget_id: widget_id.to_string(),
         write_tx,
         kill_tx,
-        _event_task: tokio::spawn(async {}),
       },
     );
 
@@ -501,6 +531,17 @@ mod tests {
       .write("widget-a", 99, Buffer::Text("hi".into()))
       .is_ok());
     assert!(table.kill("widget-a", 99).is_ok());
+  }
+
+  #[tokio::test]
+  async fn terminated_process_is_forgotten() {
+    let mut table = ProcessTable::default();
+    insert_process(&mut table, 1, "widget-a");
+
+    table.remove(1);
+
+    assert!(!table.children.contains_key(&1));
+    assert!(table.kill("widget-a", 1).is_ok());
   }
 
   fn privilege(program: &str, args_regex: &str) -> ShellPrivilege {
