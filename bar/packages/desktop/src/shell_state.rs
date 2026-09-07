@@ -13,7 +13,7 @@ use shell_util::{
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::widget_factory::WidgetFactory;
+use crate::{widget_factory::WidgetFactory, widget_pack::ShellPrivilege};
 
 /// Handle for managing a spawned child process.
 #[derive(Debug)]
@@ -337,22 +337,8 @@ impl ShellState {
       bail!("No shell privileges found for program '{program}'.");
     }
 
-    for privilege in program_privileges {
-      // Allow empty args if args regex is also empty.
-      if privilege.args_regex.is_empty() {
-        if args_str.is_empty() {
-          return Ok(resolved_program);
-        }
-
-        continue;
-      }
-
-      // Check if args match the regex pattern.
-      if let Ok(re) = regex::Regex::new(&privilege.args_regex) {
-        if re.is_match(&args_str) {
-          return Ok(resolved_program);
-        }
-      }
+    if args_allowed(&program_privileges, &args_str) {
+      return Ok(resolved_program);
     }
 
     bail!(
@@ -368,6 +354,35 @@ impl ShellState {
 fn resolve_program(program: &str) -> anyhow::Result<PathBuf> {
   which::which(program)
     .with_context(|| format!("Could not resolve program '{program}'."))
+}
+
+/// Checks whether `args` matches at least one privilege's `args_regex`,
+/// anchored to match the whole argument string rather than a substring.
+///
+/// A privilege with an empty `args_regex` only matches empty `args`. A
+/// privilege whose pattern fails to compile is treated as not matching.
+fn args_allowed(privileges: &[&ShellPrivilege], args: &str) -> bool {
+  privileges.iter().any(|privilege| {
+    if privilege.args_regex.is_empty() {
+      return args.is_empty();
+    }
+
+    let anchored = format!("^(?:{})$", privilege.args_regex);
+
+    match regex::Regex::new(&anchored) {
+      Ok(re) => re.is_match(args),
+      Err(_) => {
+        tracing::warn!(
+          "Widget shell privilege for program '{}' has an invalid \
+           args_regex '{}'.",
+          privilege.program,
+          privilege.args_regex
+        );
+
+        false
+      }
+    }
+  })
 }
 
 /// Drops a widget-supplied `PATH` override. Program lookup already uses
@@ -486,6 +501,27 @@ mod tests {
       .write("widget-a", 99, Buffer::Text("hi".into()))
       .is_ok());
     assert!(table.kill("widget-a", 99).is_ok());
+  }
+
+  fn privilege(program: &str, args_regex: &str) -> ShellPrivilege {
+    ShellPrivilege {
+      program: program.to_string(),
+      args_regex: args_regex.to_string(),
+    }
+  }
+
+  #[test]
+  fn regex_must_match_whole_argument_string() {
+    let status_only = [privilege("git", "status")];
+    let status_refs: Vec<_> = status_only.iter().collect();
+
+    assert!(!args_allowed(&status_refs, "-c core.sshCommand=x status"));
+    assert!(args_allowed(&status_refs, "status"));
+
+    let anything = [privilege("git", ".*")];
+    let anything_refs: Vec<_> = anything.iter().collect();
+
+    assert!(args_allowed(&anything_refs, "-c core.sshCommand=x status"));
   }
 
   #[test]

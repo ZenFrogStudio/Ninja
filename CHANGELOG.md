@@ -9,6 +9,9 @@
 - Shell privileges now resolve the program to an absolute path with the
   bar's own `PATH` before checking, and a widget-supplied `PATH` is
   ignored.
+- **Breaking:** a shell privilege's `argsRegex` must now match the whole
+  argument string. Patterns that relied on matching a substring need
+  anchoring removed, e.g. `status` becomes `.*status.*`.
 
 ### Removed
 
