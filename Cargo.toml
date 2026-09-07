@@ -24,9 +24,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 wm-macros = { path = "packages/wm-macros" }
 
-# Used by the vendored bar. Kept at 0.58 rather than the 0.52 that
-# `wm-platform` pins directly, since the two are semver-incompatible and
-# Cargo builds both side by side.
+# Our crates (`wm-platform`, `ninja`) share `windows` 0.58. Tauri pulls
+# 0.61 on its own. Keep this pin and `wm-platform`'s pin on the same
+# version.
 windows-core = "0.58"
 windows = { version = "0.58", features = [
   "Foundation",

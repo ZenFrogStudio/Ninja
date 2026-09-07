@@ -7,6 +7,8 @@
 - The tray's Settings, Widgets and Reload bar items now talk to the bar
   directly instead of launching a second `ninja.exe` to forward the
   request.
+- Updated `sysinfo`, removing one duplicate copy of the `windows` crate
+  from the build.
 
 ### Security
 
