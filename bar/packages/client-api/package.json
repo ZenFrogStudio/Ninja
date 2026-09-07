@@ -24,6 +24,7 @@
     "dev": "pnpm build --watch src",
     "dev:local": "pnpm dev",
     "prepublishOnly": "pnpm build",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -37,6 +38,7 @@
     "@types/luxon": "3.4.2",
     "esbuild": "0.20.0",
     "tsup": "8.0.2",
-    "typescript": "5.3.3"
+    "typescript": "5.3.3",
+    "vitest": "3.2.4"
   }
 }

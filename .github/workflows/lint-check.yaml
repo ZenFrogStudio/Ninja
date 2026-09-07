@@ -51,6 +51,10 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm --filter ninja build
 
+      - name: Test client API
+        working-directory: bar
+        run: pnpm --filter ninja test
+
       # Clippy itself runs `cargo check`, so this also catches compile errors.
       # Warnings are fatal for the WM crates and the bar alike.
       - name: Check linting (clippy)

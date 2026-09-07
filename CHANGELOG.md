@@ -11,6 +11,7 @@
   from the build.
 - CI now runs the Rust test suite, and clippy warnings in the bar fail
   the build like they do for the window manager.
+- The client API now has a vitest test suite, run in CI.
 
 ### Security
 

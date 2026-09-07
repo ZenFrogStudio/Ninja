@@ -10,6 +10,7 @@
     "dev": "pnpm run --filter ninja build && pnpm run --parallel dev",
     "format": "prettier --write . && pnpm run -r format",
     "lint": "prettier --check . && pnpm run -r lint",
+    "test": "pnpm run -r test",
     "typecheck": "pnpm run -r typecheck"
   },
   "prettier": "@glzr/style-guide/prettier",
