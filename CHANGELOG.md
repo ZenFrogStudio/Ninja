@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Security
+
+- Widgets can no longer run `shell-exec` through the `ninja` provider's
+  `runCommand`. Use `shellExec` with a `shellCommands` privilege.
+
 ## 0.3.3 - 2026-09-06
 
 ### Security
