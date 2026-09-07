@@ -64,3 +64,10 @@ jobs:
       - name: Check linting of vendored bar (non-fatal)
         continue-on-error: true
         run: cargo clippy -p ninja --all-targets
+
+      # `wm-watcher` is Windows-only, so it's excluded from the macOS run.
+      - name: Run tests
+        env:
+          SCOPE: ${{ matrix.platform != 'windows-latest' && '--exclude wm-watcher' || '' }}
+        shell: bash
+        run: cargo test --workspace --locked $SCOPE
