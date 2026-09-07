@@ -50,7 +50,6 @@ tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { workspace = true }
 wm-common = { path = "../../../packages/wm-common" }
-wm-ipc-client = { path = "../../../packages/wm-ipc-client" }
 wm = { path = "../../../packages/wm" }
 wm-cli = { path = "../../../packages/wm-cli" }
 wm-platform = { path = "../../../packages/wm-platform" }

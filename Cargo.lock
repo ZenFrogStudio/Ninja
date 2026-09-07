@@ -3501,7 +3501,6 @@ dependencies = [
  "wm",
  "wm-cli",
  "wm-common",
- "wm-ipc-client",
  "wm-platform",
 ]
 
