@@ -7,7 +7,9 @@ use serde_json::Value;
 use tokio::{sync::mpsc, task};
 use tracing::{debug, info, warn};
 use wm::LocalIpcClient;
-use wm_common::{AppCommand, ClientResponseData, InvokeCommand, ServerMessage};
+use wm_common::{
+  AppCommand, ClientResponseData, InvokeCommand, ServerMessage,
+};
 
 use crate::providers::{
   CommonProviderState, NinjaFunction, Provider, ProviderFunction,
@@ -358,7 +360,9 @@ impl NinjaProvider {
 /// with a `shellCommands` privilege for that.
 fn ensure_widget_may_run(command: &str) -> anyhow::Result<()> {
   let parsed = AppCommand::try_parse_from(
-    iter::once("").chain(iter::once("command")).chain(command.split_whitespace()),
+    iter::once("")
+      .chain(iter::once("command"))
+      .chain(command.split_whitespace()),
   );
 
   if let Ok(AppCommand::Command {
@@ -417,9 +421,8 @@ mod tests {
 
   #[test]
   fn refuses_shell_exec_with_flags() {
-    assert!(
-      ensure_widget_may_run("shell-exec --hide-window cmd /C dir").is_err()
-    );
+    assert!(ensure_widget_may_run("shell-exec --hide-window cmd /C dir")
+      .is_err());
   }
 
   #[test]

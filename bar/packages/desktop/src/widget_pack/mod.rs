@@ -1,7 +1,5 @@
 mod config;
 
-pub use config::*;
-
 use std::{
   collections::HashMap,
   fs::{self},
@@ -10,6 +8,7 @@ use std::{
 };
 
 use anyhow::Context;
+pub use config::*;
 use tokio::sync::{broadcast, Mutex};
 
 use crate::{
