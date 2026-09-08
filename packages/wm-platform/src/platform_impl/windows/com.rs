@@ -45,21 +45,33 @@ impl ComInit {
   /// if COM is already initialized with an incompatible threading model.
   #[must_use]
   pub(crate) fn new() -> Self {
+    // SAFETY: `COM_INIT` builds one `ComInit` per thread, so this is the
+    // first initialization on this thread, and the matching
+    // `CoUninitialize` runs in `Drop`.
     unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
       .ok()
       .expect("Unable to initialize COM.");
 
+    // SAFETY: COM was just initialized on this thread, and the CLSID and
+    // the interface being requested are compile-time constants that
+    // match each other.
     let service_provider = unsafe {
       CoCreateInstance(&CLSID_IMMERSIVE_SHELL, None, CLSCTX_ALL)
     }
     .ok();
 
+    // SAFETY: `provider` is a live interface created just above on this
+    // COM-initialized thread, and the IID is a compile-time constant
+    // matching the interface the result is stored as.
     let application_view_collection = service_provider.as_ref().and_then(
       |provider: &IServiceProvider| unsafe {
         provider.QueryService(&IApplicationViewCollection::IID).ok()
       },
     );
 
+    // SAFETY: COM was initialized on this thread above, and the CLSID
+    // and the interface being requested are compile-time constants that
+    // match each other.
     let taskbar_list =
       unsafe { CoCreateInstance(&TaskbarList, None, CLSCTX_SERVER) }.ok();
 
@@ -97,12 +109,18 @@ impl ComInit {
   /// stale interface pointers (e.g. after Explorer restarts).
   pub(crate) fn refresh(&mut self) {
     // Re-create the service provider.
+    // SAFETY: A `ComInit` only exists on a thread where `new` ran
+    // `CoInitializeEx`, and the CLSID and the interface being requested
+    // are compile-time constants that match each other.
     self.service_provider = unsafe {
       CoCreateInstance(&CLSID_IMMERSIVE_SHELL, None, CLSCTX_ALL)
     }
     .ok();
 
     // Re-create the application view collection.
+    // SAFETY: `provider` is the interface created just above on this
+    // COM-initialized thread, and the IID is a compile-time constant
+    // matching the interface the result is stored as.
     self.application_view_collection = self
       .service_provider
       .as_ref()
@@ -111,6 +129,9 @@ impl ComInit {
       });
 
     // Re-create the taskbar list.
+    // SAFETY: A `ComInit` only exists on a thread where `new` ran
+    // `CoInitializeEx`, and the CLSID and the interface being requested
+    // are compile-time constants that match each other.
     self.taskbar_list =
       unsafe { CoCreateInstance(&TaskbarList, None, CLSCTX_SERVER) }.ok();
   }
@@ -144,6 +165,9 @@ impl Drop for ComInit {
     drop(self.application_view_collection.take());
     drop(self.service_provider.take());
 
+    // SAFETY: This balances the `CoInitializeEx` that `new` ran on this
+    // same thread, and every interface obtained from it was dropped
+    // above.
     unsafe { CoUninitialize() };
   }
 }
@@ -151,11 +175,26 @@ impl Drop for ComInit {
 /// Undocumented COM interface for Windows shell functionality.
 ///
 /// Note that filler methods are added to match the vtable layout.
+///
+/// # Safety
+///
+/// Every method dispatches blindly through the vtable of the object
+/// behind `self`, so an instance may only come from the shell service
+/// identified by the IID above, and may only be used while that object
+/// is alive on the thread COM was initialized on. `m1` to `m3` stand in
+/// for entries whose signatures are unknown, and must never be called.
 #[windows_interface::interface("1841c6d7-4f9d-42c0-af41-8747538f10e5")]
 pub unsafe trait IApplicationViewCollection: IUnknown {
   pub unsafe fn m1(&self);
   pub unsafe fn m2(&self);
   pub unsafe fn m3(&self);
+  /// Writes the application view for a window handle to
+  /// `application_view`.
+  ///
+  /// # Safety
+  ///
+  /// `application_view` must point at a writable
+  /// `Option<IApplicationView>` that stays alive until the call returns.
   pub unsafe fn get_view_for_hwnd(
     &self,
     window: isize,
@@ -166,6 +205,14 @@ pub unsafe trait IApplicationViewCollection: IUnknown {
 /// Undocumented COM interface for managing views in the Windows shell.
 ///
 /// Note that filler methods are added to match the vtable layout.
+///
+/// # Safety
+///
+/// Every method dispatches blindly through the vtable of the object
+/// behind `self`, so an instance may only come from
+/// `IApplicationViewCollection`, and may only be used while that object
+/// is alive on the thread COM was initialized on. `m1` to `m9` stand in
+/// for entries whose signatures are unknown, and must never be called.
 #[windows_interface::interface("372E1D3B-38D3-42E4-A15B-8AB2B178F513")]
 pub unsafe trait IApplicationView: IUnknown {
   pub unsafe fn m1(&self);
@@ -177,6 +224,13 @@ pub unsafe trait IApplicationView: IUnknown {
   pub unsafe fn m7(&self);
   pub unsafe fn m8(&self);
   pub unsafe fn m9(&self);
+  /// Cloaks or uncloaks the view.
+  ///
+  /// # Safety
+  ///
+  /// No pointers are passed, but both arguments go straight to the
+  /// shell, which only defines behaviour for the documented cloak type
+  /// and flag values.
   pub unsafe fn set_cloak(
     &self,
     cloak_type: u32,
