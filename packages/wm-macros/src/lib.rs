@@ -1,6 +1,8 @@
 // Enable proc macro diagnostics to allow emitting warnings and errors in
 // line
 #![feature(proc_macro_diagnostic)]
+// `CLAUDE.md` requires a `SAFETY:` comment on every `unsafe` block.
+#![warn(clippy::undocumented_unsafe_blocks)]
 
 mod common;
 mod enum_from_inner;

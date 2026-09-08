@@ -4,6 +4,8 @@
 // in release mode.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![warn(clippy::all, clippy::pedantic)]
+// `CLAUDE.md` requires a `SAFETY:` comment on every `unsafe` block.
+#![warn(clippy::undocumented_unsafe_blocks)]
 
 use std::{process, sync::mpsc, thread, time::Duration};
 

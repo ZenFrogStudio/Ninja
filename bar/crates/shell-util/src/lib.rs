@@ -1,3 +1,6 @@
+// `CLAUDE.md` requires a `SAFETY:` comment on every `unsafe` block.
+#![warn(clippy::undocumented_unsafe_blocks)]
+
 mod encoding;
 mod error;
 mod options;

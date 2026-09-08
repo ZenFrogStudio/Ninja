@@ -60,3 +60,5 @@ windows = { version = "0.58", features = [
 clippy.all = { level = "warn", priority = -1 }
 clippy.pedantic = { level = "warn", priority = -1 }
 clippy.missing_errors_doc = "allow"
+# `CLAUDE.md` requires a `SAFETY:` comment on every `unsafe` block.
+clippy.undocumented_unsafe_blocks = "warn"

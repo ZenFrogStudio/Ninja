@@ -1,5 +1,7 @@
 // Prevent additional console window on Windows in release mode.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// `CLAUDE.md` requires a `SAFETY:` comment on every `unsafe` block.
+#![warn(clippy::undocumented_unsafe_blocks)]
 
 use std::{env, path::Path, sync::Arc};
 #[cfg(target_os = "windows")]
