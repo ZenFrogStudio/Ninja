@@ -41,12 +41,18 @@ impl Util {
       ..Default::default()
     };
 
+    // SAFETY: `class` is a fully initialized `WNDCLASSW` living on this
+    // stack frame, and its `lpszClassName` points into `class_name`,
+    // which outlives both this call and the `CreateWindowExW` below.
     let class_atom = unsafe { RegisterClassW(&class) };
 
     if class_atom == 0 {
       return Err(crate::Error::MessageWindowCreationFailed);
     }
 
+    // SAFETY: The window class was just registered successfully, and
+    // `class_name` is a null-terminated wide string that stays alive for
+    // the duration of the call.
     let handle = unsafe {
       CreateWindowExW(
         WS_EX_TOOLWINDOW | WS_EX_APPWINDOW | WS_EX_TOPMOST,
@@ -75,8 +81,16 @@ impl Util {
     let mut msg = MSG::default();
 
     loop {
+      // SAFETY: `msg` is an owned, initialized `MSG` that outlives the
+      // call, and the loop runs on the thread whose message queue is
+      // being drained.
       if unsafe { GetMessageW(&mut msg, None, 0, 0) }.as_bool() {
+        // SAFETY: `msg` was filled in by the `GetMessageW` above, which
+        // returned a message rather than `WM_QUIT` or an error.
         let _ = unsafe { TranslateMessage(&msg) };
+
+        // SAFETY: Same as above; `msg` holds a valid message retrieved
+        // on this thread.
         unsafe { DispatchMessageW(&msg) };
       } else {
         break;
@@ -90,8 +104,13 @@ impl Util {
   ) -> crate::Result<()> {
     let handle = thread.as_raw_handle();
     let handle = HANDLE(handle);
+
+    // SAFETY: The handle is borrowed from a live `JoinHandle`, so the
+    // thread handle is still open for the duration of the call.
     let thread_id = unsafe { GetThreadId(handle) };
 
+    // SAFETY: `thread_id` identifies the thread that `GetThreadId` just
+    // resolved, and `WM_QUIT` carries no pointers in its parameters.
     unsafe {
       PostThreadMessageW(
         thread_id,
@@ -120,16 +139,33 @@ impl Util {
   /// Gets the mouse position in screen coordinates.
   pub fn cursor_position() -> crate::Result<(i32, i32)> {
     let mut point = POINT { x: 0, y: 0 };
+
+    // SAFETY: `point` is an owned, initialized `POINT` that outlives the
+    // call, so the out-parameter write is in bounds.
     unsafe { GetCursorPos(&mut point) }?;
+
     Ok((point.x, point.y))
   }
 
   /// Converts a Windows icon to a sendable image.
+  ///
+  /// The handle is passed as an `isize` because it travels through the
+  /// tray event channel. `GetIconInfo` rejects handles that are not live
+  /// icons, so a stale handle surfaces as an error rather than undefined
+  /// behaviour.
   pub fn icon_to_image(icon: isize) -> crate::Result<RgbaImage> {
     let mut icon_info = ICONINFO::default();
+
+    // SAFETY: `icon_info` is owned by this frame and outlives the call.
+    // On success the shell hands us ownership of `hbmMask` and
+    // `hbmColor`, both of which are deleted on every path below.
     unsafe { GetIconInfo(HICON(icon as _), &mut icon_info) }?;
 
     let mut bitmap = BITMAP::default();
+
+    // SAFETY: `hbmColor` came from the successful `GetIconInfo` above,
+    // and the byte count passed is exactly the size of the `BITMAP` that
+    // the pointer refers to.
     let bitmap_res = unsafe {
       GetObjectW(
         icon_info.hbmColor,
@@ -140,8 +176,14 @@ impl Util {
 
     if bitmap_res == 0 {
       let error = windows::core::Error::from_win32();
+
+      // SAFETY: Both bitmaps are owned by us via `GetIconInfo` and are
+      // deleted exactly once on this error path.
       unsafe { DeleteObject(icon_info.hbmMask) }.ok()?;
+
+      // SAFETY: As above, for the colour bitmap.
       unsafe { DeleteObject(icon_info.hbmColor) }.ok()?;
+
       return Err(error.into());
     }
 
@@ -161,11 +203,20 @@ impl Util {
     let mut color_buffer = vec![0u8; buffer_size];
     let mut mask_buffer = vec![0u8; buffer_size];
 
+    // SAFETY: A null `HWND` asks for the screen device context, which is
+    // released by the `ReleaseDC` below.
     let dc = unsafe { GetDC(None) };
+
     if dc.is_invalid() {
       let error = windows::core::Error::from_win32();
+
+      // SAFETY: Both bitmaps are owned by us via `GetIconInfo` and are
+      // deleted exactly once on this error path.
       unsafe { DeleteObject(icon_info.hbmMask) }.ok()?;
+
+      // SAFETY: As above, for the colour bitmap.
       unsafe { DeleteObject(icon_info.hbmColor) }.ok()?;
+
       return Err(error.into());
     }
 
@@ -182,6 +233,10 @@ impl Util {
     };
 
     // Get color bitmap data.
+    //
+    // SAFETY: `dc` and `hbmColor` are both live, and `color_buffer` holds
+    // `bmWidth * bmHeight * 4` bytes, which is exactly what the 32-bit
+    // `bi` header asks GDI to write for `height_u32` rows.
     let color_result = unsafe {
       GetDIBits(
         dc,
@@ -195,6 +250,9 @@ impl Util {
     };
 
     // Get mask bitmap data.
+    //
+    // SAFETY: As above; `mask_buffer` is sized identically to
+    // `color_buffer` and the same `bi` header describes the write.
     let mask_result = unsafe {
       GetDIBits(
         dc,
@@ -207,8 +265,15 @@ impl Util {
       )
     };
 
+    // SAFETY: `dc` came from the `GetDC(None)` above and is released
+    // exactly once, against the same null `HWND` it was acquired for.
     unsafe { ReleaseDC(None, dc) };
+
+    // SAFETY: Both bitmaps are owned by us via `GetIconInfo`, are no
+    // longer read after the `GetDIBits` calls, and are deleted once.
     unsafe { DeleteObject(icon_info.hbmMask) }.ok()?;
+
+    // SAFETY: As above, for the colour bitmap.
     unsafe { DeleteObject(icon_info.hbmColor) }.ok()?;
 
     if color_result == 0 || mask_result == 0 {
@@ -252,11 +317,15 @@ impl Util {
 
   /// Finds the Windows tray window, ignoring a specific window handle.
   pub fn find_tray_window(hwnd_ignore: isize) -> Option<isize> {
+    // SAFETY: `w!` produces a static null-terminated wide string, and
+    // `FindWindowW` only borrows it for the duration of the call.
     let mut taskbar_hwnd =
       unsafe { FindWindowW(w!("Shell_TrayWnd"), None) }.ok()?;
 
     if hwnd_ignore != 0 {
       while taskbar_hwnd == HWND(hwnd_ignore as _) {
+        // SAFETY: `taskbar_hwnd` is a live handle from the search above,
+        // used here as the "search after this child" marker.
         taskbar_hwnd = unsafe {
           FindWindowExW(
             HWND::default(),
@@ -275,6 +344,9 @@ impl Util {
   /// Finds the toolbar window (contains tray icons) within the given tray
   /// window.
   pub fn find_tray_toolbar_window(tray_handle: isize) -> Option<isize> {
+    // SAFETY: `tray_handle` comes from `Util::find_tray_window`. A stale
+    // handle makes the search fail rather than misbehave, and the class
+    // name is a static wide string.
     let notify = unsafe {
       FindWindowExW(
         HWND(tray_handle as _),
@@ -286,10 +358,12 @@ impl Util {
     .ok()?;
     tracing::info!("Found TrayNotifyWnd: {:?}", notify);
 
+    // SAFETY: `notify` is a live handle returned by the search above.
     let pager =
       unsafe { FindWindowExW(notify, None, w!("SysPager"), None) }.ok()?;
     tracing::info!("Found SysPager: {:?}", pager);
 
+    // SAFETY: `pager` is a live handle returned by the search above.
     let toolbar =
       unsafe { FindWindowExW(pager, None, w!("ToolbarWindow32"), None) }
         .ok()?;
@@ -302,9 +376,12 @@ impl Util {
   /// This is the window accessed via the chevron button in the Windows
   /// taskbar.
   pub fn find_overflow_toolbar_window() -> Option<isize> {
+    // SAFETY: `w!` produces a static null-terminated wide string that is
+    // only borrowed for the duration of the call.
     let notify =
       unsafe { FindWindowW(w!("NotifyIconOverflowWindow"), None) }.ok()?;
 
+    // SAFETY: `notify` is a live handle returned by the search above.
     let toolbar =
       unsafe { FindWindowExW(notify, None, w!("ToolbarWindow32"), None) }
         .ok()?;

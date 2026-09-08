@@ -178,9 +178,15 @@ impl From<NotifyIconData> for IconEventData {
       None
     };
 
+    // SAFETY: `NOTIFYICONDATAW_0` is a union of `uTimeout` and
+    // `uVersion`, both `u32`, so reading it as `uVersion` is always a
+    // valid `u32` read regardless of which field the sender wrote. The
+    // range check below decides whether the value is meaningful.
     let version = if unsafe { icon_data.anonymous.uVersion } > 0
       && unsafe { icon_data.anonymous.uVersion } <= 4
     {
+      // SAFETY: As above, reading the union as `uVersion` is a valid
+      // `u32` read, and the condition confirmed the value is in range.
       Some(unsafe { icon_data.anonymous.uVersion })
     } else {
       None
@@ -284,6 +290,10 @@ impl TraySpy {
 
     // TODO: Check whether this can be done in a better way. Check out
     // SimpleClassicTheme.Taskbar project for potential implementation.
+    //
+    // SAFETY: `window` was just created by `create_message_window` on
+    // this thread, so the timer is owned by the same thread that runs
+    // the message loop below and receives its `WM_TIMER` messages.
     unsafe { SetTimer(HWND(window as _), 1, 100, None) };
 
     let event_tx =
@@ -325,6 +335,9 @@ impl TraySpy {
         if Self::should_forward_message(msg) {
           Self::forward_message(hwnd, msg, wparam, lparam)
         } else {
+          // SAFETY: The arguments are the ones the window procedure was
+          // invoked with, passed through unchanged to the default
+          // handler, which is what the caller expects on this thread.
           unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
         }
       }
@@ -338,6 +351,11 @@ impl TraySpy {
     lparam: LPARAM,
   ) -> LRESULT {
     // Extract `COPYDATASTRUCT` and return early if invalid.
+    //
+    // SAFETY: For `WM_COPYDATA`, Windows guarantees the `lparam` is a
+    // pointer to a `COPYDATASTRUCT` that stays valid for the duration of
+    // this handler. `as_ref` rejects a null pointer, and the borrow does
+    // not outlive the call.
     let Some(copy_data) =
       (unsafe { (lparam.0 as *const COPYDATASTRUCT).as_ref() })
     else {
@@ -346,6 +364,10 @@ impl TraySpy {
 
     match copy_data.dwData {
       1 if !copy_data.lpData.is_null() => {
+        // SAFETY: A `dwData` of 1 is the shell's tag for a tray message,
+        // so `lpData` points at a `ShellTrayMessage`. The guard above
+        // rules out null, `ShellTrayMessage` is `#[repr(C)]` and matches
+        // the shell's layout, and the buffer outlives this handler.
         let tray_message =
           unsafe { &*copy_data.lpData.cast::<ShellTrayMessage>() };
 
@@ -375,6 +397,11 @@ impl TraySpy {
         Self::forward_message(hwnd, msg, wparam, lparam)
       }
       3 if !copy_data.lpData.is_null() => {
+        // SAFETY: A `dwData` of 3 is the shell's tag for an icon
+        // position query, so `lpData` points at a
+        // `NotifyIconIdentifier`. The guard above rules out null, the
+        // `#[repr(C)]` layout matches, and the buffer outlives this
+        // handler.
         let icon_identifier =
           unsafe { &*copy_data.lpData.cast::<NotifyIconIdentifier>() };
 
@@ -404,6 +431,9 @@ impl TraySpy {
 
   /// Brings the spy window to the top of the z-order.
   fn bring_to_top(window_handle: HWND) -> crate::Result<()> {
+    // SAFETY: `window_handle` is the spy window, which is alive for as
+    // long as its message loop runs and is the source of the `WM_TIMER`
+    // that triggers this call.
     unsafe {
       SetWindowPos(
         window_handle,
@@ -430,12 +460,17 @@ impl TraySpy {
       "Refreshing icons by sending `TaskbarCreated` message."
     );
 
+    // SAFETY: `w!` produces a static null-terminated wide string that is
+    // only borrowed for the duration of the call.
     let msg = unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) };
 
     if msg == 0 {
       return Err(windows::core::Error::from_win32().into());
     }
 
+    // SAFETY: `msg` is the message ID just registered, and neither the
+    // `wparam` nor `lparam` carries a pointer, so broadcasting it to
+    // every top-level window passes nothing that could dangle.
     unsafe { SendNotifyMessageW(HWND_BROADCAST, msg, None, None) }?;
 
     Ok(())
@@ -456,14 +491,28 @@ impl TraySpy {
 
     // Get process handle of tray window.
     let mut process_id = u32::default();
+
+    // SAFETY: `tray` is a live handle from `find_tray_window`, and
+    // `process_id` is an owned `u32` that outlives the call.
     unsafe {
       GetWindowThreadProcessId(HWND(tray as _), Some(&mut process_id));
     }
 
+    // SAFETY: `process_id` was filled in above. The returned handle needs
+    // `PROCESS_VM_OPERATION`, `PROCESS_VM_READ` and `PROCESS_QUERY_-`
+    // `INFORMATION` for the allocate/read calls below, all of which
+    // `PROCESS_ALL_ACCESS` grants. It is closed once at the end of this
+    // function.
     let tray_process =
       unsafe { OpenProcess(PROCESS_ALL_ACCESS, false, process_id) }?;
 
     // Allocate memory in target process.
+    //
+    // SAFETY: `tray_process` was opened with `PROCESS_VM_OPERATION` just
+    // above. This reserves exactly `size_of::<TBBUTTON>()` readable and
+    // writable bytes in that process, which is the size the
+    // `ReadProcessMemory` in `read_tray_icon` later asks for. It is
+    // freed once below.
     let buffer = unsafe {
       VirtualAllocEx(
         tray_process,
@@ -482,6 +531,10 @@ impl TraySpy {
 
     for toolbar in toolbars.into_iter().flatten() {
       // Get number of tray icons.
+      //
+      // SAFETY: `toolbar` is a live handle from `Util`'s toolbar
+      // lookups, and `TB_BUTTONCOUNT` takes no parameters, so nothing
+      // that could dangle crosses the process boundary.
       let count = unsafe {
         SendMessageW(HWND(toolbar as _), TB_BUTTONCOUNT, None, None)
       }
@@ -500,7 +553,13 @@ impl TraySpy {
     }
 
     // Cleanup.
+    //
+    // SAFETY: `buffer` is the allocation made above in `tray_process`,
+    // released exactly once. `MEM_RELEASE` requires a size of 0.
     let _ = unsafe { VirtualFreeEx(tray_process, buffer, 0, MEM_RELEASE) };
+
+    // SAFETY: `tray_process` came from the `OpenProcess` above, is no
+    // longer used after this point, and is closed exactly once.
     let _ = unsafe { CloseHandle(tray_process) };
 
     tracing::info!("Retrieved {} icons from system tray.", icons.len());
@@ -508,6 +567,12 @@ impl TraySpy {
     Ok(icons)
   }
 
+  /// Reads a single tray icon out of the tray process.
+  ///
+  /// `buffer` must be an allocation of at least `size_of::<TBBUTTON>()`
+  /// bytes inside `tray_process`, and `tray_process` must have been
+  /// opened with `PROCESS_VM_READ`. `TraySpy::initial_tray_icons` is the
+  /// only caller and satisfies both.
   fn read_tray_icon(
     tray_process: HANDLE,
     buffer: *mut c_void,
@@ -515,6 +580,11 @@ impl TraySpy {
     index: usize,
   ) -> crate::Result<IconEventData> {
     // Get button info via a taskbar message.
+    //
+    // SAFETY: `TB_GETBUTTON` writes one `TBBUTTON` to the address in
+    // `lparam`, interpreted in the toolbar's own address space. `buffer`
+    // is an allocation of exactly that size in `tray_process`, which is
+    // the process that owns `toolbar`.
     unsafe {
       SendMessageW(
         HWND(toolbar as _),
@@ -525,7 +595,14 @@ impl TraySpy {
     };
 
     // Read shared memory containing the taskbar button data.
+    //
+    // SAFETY: `TBBUTTON` is `#[repr(C)]` and has no padding invariants,
+    // so an all-zero value is valid to start from.
     let mut button: TBBUTTON = unsafe { std::mem::zeroed() };
+
+    // SAFETY: The read is bounded by `size_of::<TBBUTTON>()`, which is
+    // both the size `buffer` was allocated with in `tray_process` and
+    // the size of the local `button` being written into.
     unsafe {
       ReadProcessMemory(
         tray_process,
@@ -537,7 +614,16 @@ impl TraySpy {
     }?;
 
     // Read shared memory containing the tray icon data.
+    //
+    // SAFETY: `TbButtonItem` is `#[repr(C)]` and made up of integers,
+    // arrays and a `GUID`, so an all-zero value is valid.
     let mut tray_item: TbButtonItem = unsafe { std::mem::zeroed() };
+
+    // SAFETY: `button.dwData` is the tray-process address of the icon
+    // record that `TB_GETBUTTON` just reported. The read is bounded by
+    // `size_of::<TbButtonItem>()`, the size of the local being written
+    // into, and `ReadProcessMemory` returns an error rather than
+    // faulting if that range is not mapped in `tray_process`.
     unsafe {
       ReadProcessMemory(
         tray_process,
@@ -579,14 +665,26 @@ impl TraySpy {
 
     let Some(real_tray) = Util::find_tray_window(hwnd.0 as isize) else {
       tracing::warn!("No real tray found.");
+
+      // SAFETY: The arguments are the ones the window procedure was
+      // invoked with, passed through unchanged to the default handler.
       return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
     };
 
     if msg > WM_USER {
+      // SAFETY: `real_tray` is a live handle from `find_tray_window`.
+      // Any pointer in `lparam` belongs to the sender, which is why this
+      // is only ever a pass-through of the parameters we were given.
       let _ =
         unsafe { PostMessageW(HWND(real_tray as _), msg, wparam, lparam) };
+
+      // SAFETY: The original arguments, passed through unchanged to the
+      // default handler.
       unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
     } else {
+      // SAFETY: `real_tray` is a live handle from `find_tray_window`.
+      // `SendMessageW` blocks until the real tray has handled the
+      // message, so any pointer in `lparam` is still valid throughout.
       unsafe { SendMessageW(HWND(real_tray as _), msg, wparam, lparam) }
     }
   }

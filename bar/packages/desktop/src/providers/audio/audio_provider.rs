@@ -136,6 +136,10 @@ impl AudioProvider {
   fn start(&mut self) -> anyhow::Result<()> {
     init_com()?;
 
+    // SAFETY: `init_com` just put this thread in the multithreaded
+    // apartment, and `MMDeviceEnumerator` is the documented CLSID for
+    // `IMMDeviceEnumerator`, so the returned pointer has the type the
+    // binding claims. The `windows` wrapper owns the reference.
     let com_enumerator: IMMDeviceEnumerator =
       unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) }?;
 
@@ -148,6 +152,11 @@ impl AudioProvider {
     .into();
 
     // Register device add/remove callback.
+    //
+    // SAFETY: `com_enumerator` was created above and outlives this call.
+    // The callback is a `windows`-generated COM object whose reference is
+    // held by `com_device_callback`, which lives until `start` returns,
+    // so it stays alive for as long as the enumerator can invoke it.
     unsafe {
       com_enumerator
         .RegisterEndpointNotificationCallback(&com_device_callback)
@@ -229,6 +238,8 @@ impl AudioProvider {
 
   /// Enumerates active devices of all device types.
   fn active_devices(&self) -> anyhow::Result<Vec<IMMDevice>> {
+    // SAFETY: The enumerator is the one created in `start`, still held by
+    // `self`, so the interface pointer is live for the call.
     let collection = unsafe {
       self
         .com_enumerator
@@ -237,7 +248,12 @@ impl AudioProvider {
         .EnumAudioEndpoints(eAll, DEVICE_STATE_ACTIVE)
     }?;
 
+    // SAFETY: `collection` owns a reference to the device collection
+    // returned above, and `GetCount` takes no arguments.
     let count = unsafe { collection.GetCount() }?;
+
+    // SAFETY: `collection` is still alive, and `i` is bounded by the
+    // count it just reported, so every index is in range.
     let devices = (0..count)
       .filter_map(|i| unsafe { collection.Item(i).ok() })
       .collect::<Vec<_>>();
@@ -249,9 +265,15 @@ impl AudioProvider {
   ///
   /// Returns a string (e.g. `Headphones (WH-1000XM3 Stereo)`).
   fn device_name(&self, com_device: &IMMDevice) -> anyhow::Result<String> {
+    // SAFETY: `com_device` is a live `IMMDevice` borrowed from the
+    // caller, and `STGM_READ` is a valid access mode for a device's
+    // property store.
     let store: IPropertyStore =
       unsafe { com_device.OpenPropertyStore(STGM_READ) }?;
 
+    // SAFETY: `store` owns a reference to the property store opened
+    // above, and `PKEY_Device_FriendlyName` is a static key. The
+    // `PROPVARIANT` is read and converted before it is dropped.
     let friendly_name =
       unsafe { store.GetValue(&PKEY_Device_FriendlyName)?.to_string() };
 
@@ -265,6 +287,10 @@ impl AudioProvider {
     device_id: String,
   ) -> anyhow::Result<(IAudioEndpointVolume, IAudioEndpointVolumeCallback)>
   {
+    // SAFETY: `com_device` is a live `IMMDevice` borrowed from the
+    // caller. `IAudioEndpointVolume` is one of the interfaces an audio
+    // endpoint can activate, so the returned pointer has the type the
+    // turbofish claims.
     let com_volume = unsafe {
       com_device.Activate::<IAudioEndpointVolume>(CLSCTX_ALL, None)
     }?;
@@ -276,6 +302,10 @@ impl AudioProvider {
       }
       .into();
 
+    // SAFETY: `com_volume` was activated just above. Both it and the
+    // callback are returned to the caller, which stores them together in
+    // a `DeviceState`, so the callback outlives the registration and is
+    // unregistered in `remove_device` before either is dropped.
     unsafe {
       com_volume.RegisterControlChangeNotify(&com_volume_callback)
     }?;
@@ -337,6 +367,8 @@ impl AudioProvider {
     &self,
     device_type: &DeviceType,
   ) -> anyhow::Result<Option<String>> {
+    // SAFETY: The enumerator is the one created in `start`, still held by
+    // `self`, so the interface pointer is live for the call.
     let default_device = unsafe {
       self
         .com_enumerator
@@ -349,6 +381,9 @@ impl AudioProvider {
     }
     .ok();
 
+    // SAFETY: `device` is a live `IMMDevice` from the call above, and the
+    // `PWSTR` it returns points at a null-terminated string that stays
+    // valid until it is freed, which is after `to_string` has copied it.
     let device_id = default_device
       .and_then(|device| unsafe { device.GetId().ok() })
       .and_then(|id| unsafe { id.to_string().ok() });
@@ -358,6 +393,9 @@ impl AudioProvider {
 
   /// Adds a device by its ID.
   fn add_device_by_id(&mut self, device_id: &str) -> anyhow::Result<()> {
+    // SAFETY: The enumerator is the one created in `start`, still held by
+    // `self`. The `HSTRING` is alive for the duration of the call, and an
+    // unknown device ID surfaces as an error rather than a bad read.
     let com_device = unsafe {
       self
         .com_enumerator
@@ -371,9 +409,15 @@ impl AudioProvider {
 
   /// Adds a device by its COM object.
   fn add_device(&mut self, com_device: IMMDevice) -> anyhow::Result<()> {
+    // SAFETY: `com_device` is a live `IMMDevice` owned by this function,
+    // and the `PWSTR` it returns points at a null-terminated string that
+    // stays valid until it is freed, which is after the copy.
     let device_id = unsafe { com_device.GetId()?.to_string() }?;
     info!("Adding new audio device: {}", device_id);
 
+    // SAFETY: Every `IMMDevice` that represents an endpoint also
+    // implements `IMMEndpoint`, and `cast` fails rather than producing a
+    // mistyped pointer if it does not.
     let device_type = DeviceType::from(unsafe {
       com_device.cast::<IMMEndpoint>()?.GetDataFlow()
     }?);
@@ -381,7 +425,12 @@ impl AudioProvider {
     let (com_volume, com_volume_callback) =
       self.register_volume_callback(&com_device, device_id.clone())?;
 
+    // SAFETY: `com_volume` owns a reference to the endpoint volume
+    // interface activated by `register_volume_callback`, so it is live
+    // for both reads.
     let volume = unsafe { com_volume.GetMasterVolumeLevelScalar() }?;
+
+    // SAFETY: As above; `com_volume` is still owned by this frame.
     let is_muted = unsafe { com_volume.GetMute()?.as_bool() };
 
     let device_state = DeviceState {
@@ -406,6 +455,10 @@ impl AudioProvider {
     if let Some(state) = self.device_states.remove(device_id) {
       info!("Audio device removed: {}", device_id);
 
+      // SAFETY: The two are the pair returned together by
+      // `register_volume_callback` and kept in the same `DeviceState`,
+      // so this unregisters exactly the callback that was registered on
+      // this interface, and does so before either is dropped.
       unsafe {
         state
           .com_volume
@@ -473,6 +526,9 @@ impl AudioProvider {
 
     match function {
       AudioFunction::SetVolume(args) => {
+        // SAFETY: `device_state` is borrowed from `self.device_states`,
+        // so its `com_volume` reference is live. A zeroed GUID is the
+        // documented "no originating event context" value.
         unsafe {
           device_state.com_volume.SetMasterVolumeLevelScalar(
             args.volume / 100.,
@@ -483,6 +539,8 @@ impl AudioProvider {
         Ok(ProviderFunctionResponse::Null)
       }
       AudioFunction::SetMute(args) => {
+        // SAFETY: As above; `device_state` is borrowed from
+        // `self.device_states` and its `com_volume` reference is live.
         unsafe {
           device_state.com_volume.SetMute(args.mute, &GUID::zeroed())
         }?;
@@ -534,6 +592,10 @@ impl IAudioEndpointVolumeCallback_Impl for VolumeCallback_Impl {
     &self,
     data: *mut AUDIO_VOLUME_NOTIFICATION_DATA,
   ) -> windows::core::Result<()> {
+    // SAFETY: The audio engine passes a pointer to an
+    // `AUDIO_VOLUME_NOTIFICATION_DATA` that is valid for the duration of
+    // the callback. `as_ref` rejects a null pointer, and the borrow does
+    // not outlive this function.
     if let Some(data) = unsafe { data.as_ref() } {
       let _ = self.event_tx.send(AudioEvent::VolumeChanged(
         self.device_id.clone(),
@@ -560,6 +622,9 @@ impl IMMNotificationClient_Impl for DeviceCallback_Impl {
     &self,
     device_id: &PCWSTR,
   ) -> windows::core::Result<()> {
+    // SAFETY: The audio engine passes a null-terminated device ID that is
+    // valid for the duration of the callback, and `to_string` copies it
+    // before this returns.
     if let Ok(id) = unsafe { device_id.to_string() } {
       let _ = self.event_tx.send(AudioEvent::DeviceAdded(id.clone()));
     }
@@ -571,6 +636,8 @@ impl IMMNotificationClient_Impl for DeviceCallback_Impl {
     &self,
     device_id: &PCWSTR,
   ) -> windows::core::Result<()> {
+    // SAFETY: As in `OnDeviceAdded`; the device ID is valid for the
+    // duration of the callback and is copied before this returns.
     if let Ok(id) = unsafe { device_id.to_string() } {
       let _ = self.event_tx.send(AudioEvent::DeviceRemoved(id));
     }
@@ -583,6 +650,8 @@ impl IMMNotificationClient_Impl for DeviceCallback_Impl {
     device_id: &PCWSTR,
     new_state: DEVICE_STATE,
   ) -> windows::core::Result<()> {
+    // SAFETY: As in `OnDeviceAdded`; the device ID is valid for the
+    // duration of the callback and is copied before this returns.
     if let Ok(id) = unsafe { device_id.to_string() } {
       let event = match new_state {
         DEVICE_STATE_ACTIVE => AudioEvent::DeviceAdded(id),
@@ -602,6 +671,8 @@ impl IMMNotificationClient_Impl for DeviceCallback_Impl {
     default_device_id: &PCWSTR,
   ) -> windows::core::Result<()> {
     if role == eMultimedia {
+      // SAFETY: As in `OnDeviceAdded`; the device ID is valid for the
+      // duration of the callback and is copied before this returns.
       if let Ok(id) = unsafe { default_device_id.to_string() } {
         let _ = self.event_tx.send(AudioEvent::DefaultDeviceChanged(
           id,

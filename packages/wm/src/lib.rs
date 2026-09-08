@@ -143,10 +143,10 @@ impl Drop for EventLoopGuard {
 /// already running on a thread of its own, and blocks the calling task for
 /// the lifetime of the WM.
 ///
-/// `bar_request_tx` is `Some` when a bar shares this process, so the tray's
-/// "Settings", "Widgets" and "Reload bar" items can ask it directly rather
-/// than spawning a second copy of the executable. Pass `None` when running
-/// standalone.
+/// `bar_request_tx` is `Some` when a bar shares this process, so the
+/// tray's "Settings", "Widgets" and "Reload bar" items can ask it directly
+/// rather than spawning a second copy of the executable. Pass `None` when
+/// running standalone.
 ///
 /// # Errors
 ///

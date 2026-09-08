@@ -66,6 +66,9 @@ async fn main() -> anyhow::Result<()> {
     use windows::Win32::System::Console::{
       AttachConsole, ATTACH_PARENT_PROCESS,
     };
+    // SAFETY: Called once before any output is written, and takes no
+    // pointers. It fails harmlessly when there is no parent console or
+    // when one is already attached.
     let _ = unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
   }
 
@@ -209,8 +212,8 @@ fn output_query(app: &tauri::App, args: QueryArgs) -> anyhow::Result<()> {
 /// The dialog plugin is registered as the first statement of `start_app`,
 /// so it is normally available even when startup fails later. But if
 /// registering the plugin is itself what failed, reaching it here would
-/// panic - caught so the caller's error is still what gets returned instead
-/// of being replaced by a panic.
+/// panic - caught so the caller's error is still what gets returned
+/// instead of being replaced by a panic.
 fn show_fatal_error_dialog(app_handle: &AppHandle, err: &anyhow::Error) {
   use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
