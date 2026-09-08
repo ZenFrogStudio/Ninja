@@ -65,6 +65,9 @@ impl WindowListener {
   /// Implements [`WindowListener::terminate`].
   pub(crate) fn terminate(&mut self) {
     for handle in self.hook_handles.drain(..) {
+      // SAFETY: Each handle was returned by `SetWinEventHook` in `new` and
+      // is owned by this `WindowListener`. `drain` empties the vector, so
+      // no handle is unhooked twice.
       let _ = unsafe {
         UnhookWinEvent(HWINEVENTHOOK(handle as *mut std::ffi::c_void))
       };
@@ -89,6 +92,11 @@ impl WindowListener {
       .iter()
       .try_fold(Vec::new(), |mut handles, (min, max)| {
         // Create a window hook for the event range.
+        // SAFETY: This runs on the dispatcher's thread, which has the
+        // message loop that a `WINEVENT_OUTOFCONTEXT` hook needs.
+        // `window_event_proc` is a `'static` function with the signature
+        // Windows expects, and no module handle is passed because the
+        // callback lives in this process.
         let hook_handle = unsafe {
           SetWinEventHook(
             *min,

@@ -75,6 +75,9 @@ impl KeyEvent {
   /// Gets whether the specified key is currently down using the raw key
   /// code.
   fn is_key_down_raw(key: u16) -> bool {
+    // SAFETY: `GetKeyState` takes a virtual-key code by value and touches
+    // no caller memory. An out-of-range code returns zero rather than
+    // faulting.
     unsafe { (GetKeyState(key.into()) & 0x80) == 0x80 }
   }
 }
@@ -117,6 +120,10 @@ impl KeyboardHook {
 
       // Returned as `isize`, since `HHOOK` wraps a raw pointer and so
       // isn't `Send`.
+      // SAFETY: This runs on the dispatcher's thread, which has the
+      // message loop that a `WH_KEYBOARD_LL` hook needs. `hook_proc` is a
+      // `'static` function with the signature Windows expects, and the
+      // callback it reads was installed on this same thread just above.
       unsafe {
         SetWindowsHookExW(
           WH_KEYBOARD_LL,
@@ -136,6 +143,10 @@ impl KeyboardHook {
 
   /// Terminates the keyboard hook by unregistering it.
   pub fn terminate(&mut self) -> crate::Result<()> {
+    // SAFETY: `handle` was returned by `SetWindowsHookExW` in `new` and is
+    // owned by this `KeyboardHook`, which unhooks it only here. A second
+    // call is reported as an error rather than unhooking someone else's
+    // hook.
     unsafe {
       UnhookWindowsHookEx(HHOOK(self.handle as *mut std::ffi::c_void))
     }?;
@@ -162,10 +173,16 @@ impl KeyboardHook {
     // If the code is less than zero, the hook procedure must pass the hook
     // notification directly to other applications.
     if code != 0 {
+      // SAFETY: Windows calls this procedure and owns `code`, `wparam` and
+      // `lparam`; passing them along unchanged is what the API asks for. A
+      // `None` hook handle is accepted and means "start from this hook".
       return unsafe { CallNextHookEx(None, code, wparam, lparam) };
     }
 
     // Get struct with the keyboard input event.
+    // SAFETY: With a `code` of `HC_ACTION`, Windows guarantees that
+    // `lparam` points to a `KBDLLHOOKSTRUCT` that is valid for the
+    // duration of this call, so the copy out of it is in bounds.
     let input = unsafe { *(lparam.0 as *const KBDLLHOOKSTRUCT) };
 
     #[allow(clippy::cast_possible_truncation)]
@@ -175,6 +192,8 @@ impl KeyboardHook {
       wparam.0 as u32 == WM_KEYDOWN || wparam.0 as u32 == WM_SYSKEYDOWN;
 
     let Ok(key) = Key::try_from(key_code) else {
+      // SAFETY: As above, the arguments are the ones Windows passed in and
+      // are forwarded unchanged.
       return unsafe { CallNextHookEx(None, code, wparam, lparam) };
     };
 
@@ -198,6 +217,8 @@ impl KeyboardHook {
       return LRESULT(1);
     }
 
+    // SAFETY: As above, the arguments are the ones Windows passed in and
+    // are forwarded unchanged.
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
   }
 }

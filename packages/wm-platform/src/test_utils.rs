@@ -44,7 +44,13 @@ impl NativeWindow {
       #[allow(invalid_value)]
       platform_impl::NativeWindow::new(
         WindowId(0),
+        // SAFETY: All-zeroes is not a valid `ThreadBound`, whose
+        // retained pointer is non-null. Sound only while the mock
+        // stays an opaque placeholder and none of its methods are
+        // called, which is what the docs above require.
         unsafe { std::mem::zeroed() },
+        // SAFETY: As above, the owning `Application` is never read from a
+        // mock window.
         unsafe { std::mem::zeroed() },
       )
       .into()
@@ -62,6 +68,10 @@ impl Display {
       #[cfg(target_os = "windows")]
       inner: platform_impl::Display::new(0),
       #[cfg(target_os = "macos")]
+      // SAFETY: All-zeroes is not a valid `Display`, since it holds an
+      // `Arc` whose pointer is non-null. This holds only while the mock is
+      // treated as an opaque placeholder and none of its methods are
+      // called, which is what this method's docs require.
       #[allow(invalid_value)]
       inner: unsafe { std::mem::zeroed() },
     }

@@ -34,6 +34,9 @@ thread_local! {
   ///
   /// This message is sent using `PostMessageW` and handled in
   /// [`EventLoop::window_proc`].
+  // SAFETY: `w!` expands to a static, null-terminated wide string, which
+  // is the only requirement `RegisterWindowMessageW` places on its
+  // argument.
   static WM_DISPATCH_CALLBACK: u32 = unsafe { RegisterWindowMessageW(w!("Ninja:Dispatch")) };
 
   /// Registered callbacks that pre-process messages in the event loop's
@@ -87,6 +90,10 @@ impl EventLoopSource {
     // Leak to a raw pointer to then be passed as `WPARAM` in the message.
     let callback_ptr = Box::into_raw(dispatch_fn);
 
+    // SAFETY: `callback_ptr` was just leaked from a `Box` and is not
+    // aliased. Ownership of it passes to `window_proc`, which runs on the
+    // event loop thread and reclaims it; if the post fails the `Box` is
+    // reclaimed here instead, so it is freed exactly once either way.
     unsafe {
       if PostMessageW(
         HWND(self.message_window_handle as *mut std::ffi::c_void),
@@ -122,6 +129,9 @@ impl EventLoopSource {
     // `SendMessageW` blocks the calling thread until the window procedure
     // processes the message and executes the closure. This guarantees the
     // closure's lifetime remains valid.
+    // SAFETY: `callback_ptr` was just leaked from a `Box` and is not
+    // aliased. `window_proc` takes ownership of it and drops it, and the
+    // blocking call keeps the closure's borrows alive until that happens.
     unsafe {
       SendMessageW(
         HWND(self.message_window_handle as *mut std::ffi::c_void),
@@ -140,6 +150,9 @@ impl EventLoopSource {
     // message came from outside our own code.
     tracing::info!("Posting quit message to the event loop.");
 
+    // SAFETY: `os_thread_id` was recorded from the event loop thread in
+    // `EventLoop::new`, and `WM_QUIT` carries no pointers, so the message
+    // is self-contained.
     unsafe {
       PostThreadMessageW(self.os_thread_id, WM_QUIT, WPARAM(0), LPARAM(0))
     }
@@ -193,6 +206,8 @@ impl EventLoop {
     let source = EventLoopSource {
       message_window_handle: window_handle,
       thread_id: thread::current().id(),
+      // SAFETY: `GetCurrentThreadId` takes no arguments, touches no
+      // memory, and cannot fail.
       os_thread_id: unsafe { GetCurrentThreadId() },
       next_callback_id: Arc::new(AtomicUsize::new(0)),
     };
@@ -210,7 +225,12 @@ impl EventLoop {
 
     // Start the message loop. Blocks until `WM_QUIT` is received.
     loop {
+      // SAFETY: `msg` is a live local for the whole call, and a null
+      // window handle asks for messages belonging to any window on this
+      // thread, which is what the loop wants.
       if unsafe { GetMessageW(&raw mut msg, None, 0, 0) }.as_bool() {
+        // SAFETY: `msg` was just filled in by `GetMessageW` and is still
+        // live, and both calls only read from it.
         unsafe {
           let _ = TranslateMessage(&raw const msg);
           DispatchMessageW(&raw const msg);
@@ -221,6 +241,9 @@ impl EventLoop {
     }
 
     tracing::info!("Event loop thread exiting.");
+    // SAFETY: The handle was created by `create_message_window` on this
+    // thread, which is the thread `DestroyWindow` must be called on. `run`
+    // executes on the same thread and destroys the window only here.
     unsafe {
       DestroyWindow(HWND(
         self.source.message_window_handle as *mut std::ffi::c_void,
@@ -251,8 +274,12 @@ impl EventLoop {
       ..Default::default()
     };
 
+    // SAFETY: `wnd_class` is a live local for the call, and its only
+    // pointer field is a static wide string literal from `w!`.
     unsafe { RegisterClassW(&raw const wnd_class) };
 
+    // SAFETY: The class name was just registered above, and both wide
+    // strings are static literals that outlive the window.
     let handle = unsafe {
       CreateWindowExW(
         WINDOW_EX_STYLE::default(),
@@ -282,6 +309,15 @@ impl EventLoop {
   }
 
   /// Window procedure for handling messages.
+  ///
+  /// # Safety
+  ///
+  /// Only Windows may call this, by way of the message window registered
+  /// in [`EventLoop::create_message_window`]. For a
+  /// `WM_DISPATCH_CALLBACK` message, `wparam` must be a pointer produced
+  /// by `Box::into_raw` on a `Box<Box<dyn FnOnce() + Send>>` that has not
+  /// already been reclaimed; only `EventLoopSource` posts that message,
+  /// and it always does so.
   unsafe extern "system" fn window_proc(
     hwnd: HWND,
     msg: u32,
@@ -291,6 +327,9 @@ impl EventLoop {
     // Handle dispatch callbacks first.
     if msg == WM_DISPATCH_CALLBACK.with(|v| *v) {
       // Convert the `WPARAM` fn pointer back to a double-boxed function.
+      // SAFETY: Per this function's contract, `wparam` is the pointer that
+      // `EventLoopSource` leaked for this message, and each posted message
+      // is delivered once, so the `Box` is reconstructed exactly once.
       let dispatch_fn: Box<Box<dyn FnOnce() + Send>> =
         Box::from_raw(wparam.0 as *mut _);
       dispatch_fn();

@@ -164,10 +164,17 @@ impl MouseListener {
     enabled_events: &[MouseEventKind],
     callback_data: &mut CallbackData,
   ) -> crate::Result<()> {
+    // SAFETY: `RAWINPUT` is a plain C struct of integers and unions, so
+    // all-zeroes is a valid value for it. It is overwritten by
+    // `GetRawInputData` below before anything reads it.
     let mut raw_input: RAWINPUT = unsafe { std::mem::zeroed() };
     #[allow(clippy::cast_possible_truncation)]
     let mut raw_input_size = std::mem::size_of::<RAWINPUT>() as u32;
 
+    // SAFETY: `lparam` is the `LPARAM` of a `WM_INPUT` message, which
+    // Windows documents as an `HRAWINPUT` valid for the duration of the
+    // message. `raw_input` and `raw_input_size` are live locals, and the
+    // size passed in bounds what the OS may write.
     let res_size = unsafe {
       #[allow(clippy::cast_possible_truncation)]
       GetRawInputData(
@@ -186,6 +193,9 @@ impl MouseListener {
     if res_size == 0
       || raw_input_size == u32::MAX
       || raw_input.header.dwType != RIM_TYPEMOUSE.0
+      // SAFETY: `||` short-circuits left to right, so the `data` union is
+      // only read as `mouse` once the preceding check has established that
+      // `dwType` is `RIM_TYPEMOUSE`.
       || unsafe { raw_input.data.mouse.ulExtraInformation } as u32
         == FOREGROUND_INPUT_IDENTIFIER
     {
@@ -194,6 +204,9 @@ impl MouseListener {
 
     // Map button flags to a `MouseEventKind`.
     let event_kind = {
+      // SAFETY: `dwType` was checked against `RIM_TYPEMOUSE` above, so the
+      // `data` union holds a `RAWMOUSE`. Its inner union is plain data
+      // with no invalid bit patterns.
       let button_flags = u32::from(unsafe {
         raw_input.data.mouse.Anonymous.Anonymous.usButtonFlags
       });
@@ -275,6 +288,8 @@ impl MouseListener {
   /// Gets the current cursor position.
   fn cursor_pos() -> crate::Result<Point> {
     let mut point = POINT { x: 0, y: 0 };
+    // SAFETY: `point` is a live, initialised local that outlives the call,
+    // and is the only thing written to.
     unsafe { GetCursorPos(&raw mut point) }?;
     Ok(Point {
       x: point.x,
@@ -306,6 +321,10 @@ impl MouseListener {
       hwndTarget: target_hwnd,
     };
 
+    // SAFETY: The slice holding `rid` is live for the call, and the size
+    // passed matches the `RAWINPUTDEVICE` elements it contains.
+    // `hwndTarget` is the event loop's message window, which is destroyed
+    // only after this listener has deregistered in `Drop`.
     unsafe {
       #[allow(clippy::cast_possible_truncation)]
       RegisterRawInputDevices(

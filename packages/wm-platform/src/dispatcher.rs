@@ -94,10 +94,14 @@ impl DispatcherExtMacOs for Dispatcher {
 
   fn has_ax_permission(&self, prompt: bool) -> bool {
     let options = CFDictionary::from_slices(
+      // SAFETY: `kAXTrustedCheckOptionPrompt` is a constant string
+      // exported by `ApplicationServices` and lives for the program.
       &[unsafe { kAXTrustedCheckOptionPrompt }],
       &[CFBoolean::new(prompt)],
     );
 
+    // SAFETY: `options` is a valid `CFDictionary` that outlives the call,
+    // and holds the one key this API accepts.
     unsafe { AXIsProcessTrustedWithOptions(Some(options.as_ref())) }
   }
 }
@@ -204,6 +208,9 @@ impl DispatcherExtWindows for Dispatcher {
       iMinAnimate: 0,
     };
 
+    // SAFETY: `animation_info` is a live local for the call, and its
+    // `cbSize` tells `SystemParametersInfoW` exactly how much of it may be
+    // written, so the write stays in bounds.
     unsafe {
       SystemParametersInfoW(
         SPI_GETANIMATION,
@@ -226,6 +233,9 @@ impl DispatcherExtWindows for Dispatcher {
       iMinAnimate: i32::from(enable),
     };
 
+    // SAFETY: `animation_info` is a live local for the call, and its
+    // `cbSize` tells `SystemParametersInfoW` exactly how much of it may be
+    // read, so the read stays in bounds.
     unsafe {
       SystemParametersInfoW(
         SPI_SETANIMATION,
@@ -242,6 +252,8 @@ impl DispatcherExtWindows for Dispatcher {
     let wide_input =
       input.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
 
+    // SAFETY: `wide_input` is null-terminated and outlives the call, and
+    // passing no output buffer asks only for the required length.
     let size = unsafe {
       ExpandEnvironmentStringsW(PCWSTR(wide_input.as_ptr()), None)
     };
@@ -253,6 +265,9 @@ impl DispatcherExtWindows for Dispatcher {
     }
 
     let mut buffer = vec![0u16; size as usize];
+    // SAFETY: `wide_input` is null-terminated and outlives the call, and
+    // `buffer` was sized to the length the first call asked for, so the
+    // slice bounds the write.
     let size = unsafe {
       ExpandEnvironmentStringsW(
         PCWSTR(wide_input.as_ptr()),
@@ -300,6 +315,9 @@ impl DispatcherExtWindows for Dispatcher {
       ..Default::default()
     };
 
+    // SAFETY: `exec_info` and the three wide strings it points at are
+    // live locals that outlive the call, and `SEE_MASK_NOASYNC` keeps the
+    // call synchronous so nothing is read after they are dropped.
     unsafe { ShellExecuteExW(&raw mut exec_info) }
       .map_err(crate::Error::from)
   }
@@ -589,6 +607,8 @@ impl Dispatcher {
     #[cfg(target_os = "windows")]
     {
       let mut point = POINT { x: 0, y: 0 };
+      // SAFETY: `point` is a live, initialised local that outlives the
+      // call, and is the only thing written to.
       unsafe { GetCursorPos(&raw mut point) }?;
 
       Ok(Point {
@@ -621,6 +641,9 @@ impl Dispatcher {
       };
 
       // High-order bit set indicates the key is currently down.
+      // SAFETY: `GetAsyncKeyState` takes a virtual-key code by value and
+      // touches no caller memory. `vk_code` is one of the two mouse
+      // button codes above, so it is in range.
       let state = unsafe { GetAsyncKeyState(vk_code.into()) };
       (state.cast_unsigned() & 0x8000u16) != 0
     }
@@ -651,6 +674,8 @@ impl Dispatcher {
     }
     #[cfg(target_os = "windows")]
     {
+      // SAFETY: `SetCursorPos` takes its coordinates by value and touches
+      // no caller memory.
       unsafe { SetCursorPos(point.x, point.y) }?;
     }
 
@@ -699,6 +724,8 @@ impl Dispatcher {
       let message_wide =
         message.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
 
+      // SAFETY: Both wide strings are null-terminated and live for the
+      // whole call, which blocks until the dialog is dismissed.
       unsafe {
         MessageBoxW(
           None,

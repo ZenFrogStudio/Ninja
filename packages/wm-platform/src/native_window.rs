@@ -35,6 +35,10 @@ impl WindowId {
   pub(crate) fn from_window_element(el: &CFRetained<AXUIElement>) -> Self {
     let mut window_id = 0;
 
+    // SAFETY: `el` is a live `AXUIElement` for the whole call, and
+    // `window_id` is a live local for the out-parameter. The element is
+    // known to be a window element, which is what this private API
+    // expects.
     unsafe {
       platform_impl::ffi::_AXUIElementGetWindow(
         CFRetained::as_ptr(el),

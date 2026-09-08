@@ -75,6 +75,10 @@ impl Display {
     let mut dpi_x = u32::default();
     let mut dpi_y = u32::default();
 
+    // SAFETY: `monitor_handle` came from the OS via `EnumDisplayMonitors`
+    // or `MonitorFromPoint`, and `dpi_x`/`dpi_y` are live locals that
+    // outlive the call. A stale handle is reported as an error, not a
+    // crash.
     unsafe {
       GetDpiForMonitor(
         HMONITOR(self.monitor_handle as *mut std::ffi::c_void),
@@ -116,6 +120,9 @@ impl Display {
         // When passing the `EDD_GET_DEVICE_INTERFACE_NAME` flag, the
         // returned `DISPLAY_DEVICEW` will contain the device path in the
         // `DeviceID` field.
+        // SAFETY: `szDevice` is a null-terminated wide string inside the
+        // live `monitor_info`, and `device` is a live local whose `cb`
+        // field states its size, which is how the OS bounds the write.
         unsafe {
           EnumDisplayDevicesW(
             PCWSTR(monitor_info.szDevice.as_ptr()),
@@ -167,6 +174,9 @@ impl Display {
       ..Default::default()
     };
 
+    // SAFETY: `monitor_info` is a live local whose `cbSize` is set to
+    // `MONITORINFOEXW`, which is how `GetMonitorInfoW` learns that the
+    // larger struct was passed and bounds its write accordingly.
     unsafe {
       GetMonitorInfoW(
         HMONITOR(self.monitor_handle as *mut std::ffi::c_void),
@@ -236,6 +246,9 @@ impl DisplayDevice {
 
   /// Implements [`DisplayDevice::rotation`].
   pub(crate) fn rotation(&self) -> crate::Result<f32> {
+    // SAFETY: `DEVMODEW`'s unions are plain data with no invalid bit
+    // patterns, and `EnumDisplaySettingsW` fills in the display fields for
+    // `ENUM_CURRENT_SETTINGS`, which is what `Anonymous2` holds.
     let orientation = unsafe {
       self
         .current_device_mode()?
@@ -317,6 +330,9 @@ impl DisplayDevice {
       .chain(std::iter::once(0))
       .collect::<Vec<_>>();
 
+    // SAFETY: `wide_adapter_name` is null-terminated and `device_mode` is
+    // a live local, both outliving the call. `dmSize` is set so the OS
+    // knows how much of the struct it may write.
     unsafe {
       EnumDisplaySettingsW(
         PCWSTR(wide_adapter_name.as_ptr()),
@@ -358,6 +374,9 @@ pub(crate) fn all_displays(
     true.into()
   }
 
+  // SAFETY: `monitor_handles` outlives the call, since
+  // `EnumDisplayMonitors` invokes the callback synchronously and does not
+  // retain the `LPARAM` afterwards.
   unsafe {
     EnumDisplayMonitors(
       HDC::default(),
@@ -393,6 +412,9 @@ pub(crate) fn display_from_point(
   point: &Point,
   _: &Dispatcher,
 ) -> crate::Result<crate::Display> {
+  // SAFETY: `MonitorFromPoint` takes its arguments by value and touches
+  // no caller memory. Any point is accepted, since
+  // `MONITOR_DEFAULTTOPRIMARY` covers points outside every display.
   let handle = unsafe {
     MonitorFromPoint(
       POINT {
@@ -411,6 +433,9 @@ pub(crate) fn display_from_point(
 pub(crate) fn primary_display(
   _: &Dispatcher,
 ) -> crate::Result<crate::Display> {
+  // SAFETY: `MonitorFromPoint` takes its arguments by value and touches
+  // no caller memory. The origin always lies on the primary display, and
+  // `MONITOR_DEFAULTTOPRIMARY` returns it regardless.
   let handle = unsafe {
     MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY)
   };
@@ -424,6 +449,9 @@ pub(crate) fn nearest_display(
   native_window: &NativeWindow,
   _: &Dispatcher,
 ) -> crate::Result<crate::Display> {
+  // SAFETY: The handle is passed by value and nothing else is read. An
+  // `HWND` that has since been destroyed is not an error here, since
+  // `MONITOR_DEFAULTTONEAREST` falls back to a real display.
   let handle = unsafe {
     MonitorFromWindow(native_window.inner.hwnd(), MONITOR_DEFAULTTONEAREST)
   };
