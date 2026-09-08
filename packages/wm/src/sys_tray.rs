@@ -4,7 +4,10 @@ use std::{
   path::Path,
   process::Command,
   str::FromStr,
-  sync::{Arc, Mutex},
+  sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+  },
 };
 
 use anyhow::Context;
@@ -87,7 +90,7 @@ impl SystemTray {
     let (exit_tx, exit_rx) = mpsc::unbounded_channel();
     let (config_reload_tx, config_reload_rx) = mpsc::unbounded_channel();
 
-    let animations_enabled = Arc::new(Mutex::new({
+    let animations_enabled = Arc::new(AtomicBool::new({
       #[cfg(target_os = "windows")]
       {
         dispatcher.window_animations_enabled().unwrap_or(false)
@@ -98,7 +101,7 @@ impl SystemTray {
       }
     }));
 
-    let run_on_startup_enabled = Arc::new(Mutex::new(
+    let run_on_startup_enabled = Arc::new(AtomicBool::new(
       auto_launch_instance()
         .and_then(|auto_launch| {
           auto_launch.is_enabled().map_err(Into::into)
@@ -108,12 +111,12 @@ impl SystemTray {
 
     let tray_icon = dispatcher.dispatch_sync(|| {
       let tray_icon = Self::create_tray_icon(
-        *animations_enabled.lock().unwrap(),
-        *run_on_startup_enabled.lock().unwrap(),
-      )
-      .unwrap();
-      ThreadBound::new(tray_icon, dispatcher.clone())
-    })?;
+        animations_enabled.load(Ordering::SeqCst),
+        run_on_startup_enabled.load(Ordering::SeqCst),
+      )?;
+
+      anyhow::Ok(ThreadBound::new(tray_icon, dispatcher.clone()))
+    })??;
 
     // Spawn thread to handle tray menu events.
     let config_path = config_path.to_owned();
@@ -299,8 +302,8 @@ impl SystemTray {
     exit_tx: &mpsc::UnboundedSender<()>,
     // LINT: `animations_enabled` is only used on Windows.
     #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
-    animations_enabled: &Arc<Mutex<bool>>,
-    run_on_startup_enabled: &Arc<Mutex<bool>>,
+    animations_enabled: &Arc<AtomicBool>,
+    run_on_startup_enabled: &Arc<AtomicBool>,
     bar_request_tx: Option<&mpsc::UnboundedSender<BarRequest>>,
   ) -> anyhow::Result<()> {
     tracing::info!("Processing tray menu event: {:?}", menu_id);
@@ -352,22 +355,21 @@ impl SystemTray {
       }
       #[cfg(target_os = "windows")]
       TrayMenuId::ToggleWindowAnimations => {
-        let mut animations_enabled = animations_enabled.lock().unwrap();
-        dispatcher.set_window_animations_enabled(!*animations_enabled)?;
-        *animations_enabled = !*animations_enabled;
+        let is_enabled = animations_enabled.load(Ordering::SeqCst);
+        dispatcher.set_window_animations_enabled(!is_enabled)?;
+        animations_enabled.store(!is_enabled, Ordering::SeqCst);
         Ok(())
       }
       TrayMenuId::RunOnStartup => {
-        let mut run_on_startup_enabled =
-          run_on_startup_enabled.lock().unwrap();
+        let is_enabled = run_on_startup_enabled.load(Ordering::SeqCst);
 
-        if *run_on_startup_enabled {
+        if is_enabled {
           auto_launch_instance()?.disable()?;
         } else {
           auto_launch_instance()?.enable()?;
         }
 
-        *run_on_startup_enabled = !*run_on_startup_enabled;
+        run_on_startup_enabled.store(!is_enabled, Ordering::SeqCst);
         Ok(())
       }
       TrayMenuId::Exit => {
