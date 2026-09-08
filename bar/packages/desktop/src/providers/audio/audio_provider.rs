@@ -25,7 +25,7 @@ use windows::Win32::{
 use windows_core::{Interface, GUID, HSTRING, PCWSTR};
 
 use crate::{
-  common::windows::COM_INIT,
+  common::windows::init_com,
   providers::{
     AudioFunction, CommonProviderState, Provider, ProviderFunction,
     ProviderFunctionResponse, ProviderInputMsg, RuntimeType,
@@ -134,98 +134,97 @@ impl AudioProvider {
 
   /// Main entry point.
   fn start(&mut self) -> anyhow::Result<()> {
-    COM_INIT.with(|_| {
-      let com_enumerator: IMMDeviceEnumerator = unsafe {
-        CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
-      }?;
+    init_com()?;
 
-      // Note that this would sporadically segfault if we didn't keep a
-      // separate variable for `IMMNotificationClient` when registering the
-      // callback. Something funky with lifetimes and the COM API's.
-      let com_device_callback: IMMNotificationClient = DeviceCallback {
-        event_tx: self.event_tx.clone(),
-      }
-      .into();
+    let com_enumerator: IMMDeviceEnumerator =
+      unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) }?;
 
-      // Register device add/remove callback.
-      unsafe {
-        com_enumerator
-          .RegisterEndpointNotificationCallback(&com_device_callback)
-      }?;
+    // Note that this would sporadically segfault if we didn't keep a
+    // separate variable for `IMMNotificationClient` when registering the
+    // callback. Something funky with lifetimes and the COM API's.
+    let com_device_callback: IMMNotificationClient = DeviceCallback {
+      event_tx: self.event_tx.clone(),
+    }
+    .into();
 
-      self.com_enumerator = Some(com_enumerator);
+    // Register device add/remove callback.
+    unsafe {
+      com_enumerator
+        .RegisterEndpointNotificationCallback(&com_device_callback)
+    }?;
 
-      // Update device list and default device IDs.
-      for com_device in self.active_devices()? {
-        self.add_device(com_device)?;
-      }
+    self.com_enumerator = Some(com_enumerator);
 
-      self.default_playback_id =
-        self.default_device_id(&DeviceType::Playback)?;
-      self.default_recording_id =
-        self.default_device_id(&DeviceType::Recording)?;
+    // Update device list and default device IDs.
+    for com_device in self.active_devices()? {
+      self.add_device(com_device)?;
+    }
 
-      // Emit initial output.
-      self.emit_output();
+    self.default_playback_id =
+      self.default_device_id(&DeviceType::Playback)?;
+    self.default_recording_id =
+      self.default_device_id(&DeviceType::Recording)?;
 
-      // Audio events (especially volume changes) can be frequent, so we
-      // batch the emissions together.
-      let mut last_emit = Instant::now();
-      let mut pending_emission = false;
-      const BATCH_DELAY: Duration = Duration::from_millis(25);
+    // Emit initial output.
+    self.emit_output();
 
-      // Listen to audio-related events.
-      loop {
-        let batch_timer = match pending_emission {
-          true => at(last_emit + BATCH_DELAY),
-          false => never(),
-        };
+    // Audio events (especially volume changes) can be frequent, so we
+    // batch the emissions together.
+    let mut last_emit = Instant::now();
+    let mut pending_emission = false;
+    const BATCH_DELAY: Duration = Duration::from_millis(25);
 
-        crossbeam::select! {
-          recv(self.event_rx) -> event => {
-            if let Ok(event) = event {
-              debug!("Got audio event: {:?}", event);
+    // Listen to audio-related events.
+    loop {
+      let batch_timer = match pending_emission {
+        true => at(last_emit + BATCH_DELAY),
+        false => never(),
+      };
 
-              if let Err(err) = self.handle_event(event) {
-                tracing::warn!("Error handling audio event: {}", err);
-              }
+      crossbeam::select! {
+        recv(self.event_rx) -> event => {
+          if let Ok(event) = event {
+            debug!("Got audio event: {:?}", event);
 
-              // Check whether we should emit immediately or mark as pending.
-              if last_emit.elapsed() >= BATCH_DELAY {
-                self.emit_output();
-                last_emit = Instant::now();
-              } else {
-                pending_emission = true;
-              }
+            if let Err(err) = self.handle_event(event) {
+              tracing::warn!("Error handling audio event: {}", err);
             }
-          }
-          recv(self.common.input.sync_rx) -> input => {
-            match input {
-              Ok(ProviderInputMsg::Stop) => {
-                break;
-              }
-              Ok(ProviderInputMsg::Function(
-                ProviderFunction::Audio(audio_function),
-                sender,
-              )) => {
-                let res = self.handle_function(audio_function).map_err(|err| err.to_string());
-                sender.send(res).unwrap();
-              }
-              _ => {}
-            }
-          }
-          recv(batch_timer) -> _ => {
-            if pending_emission {
+
+            // Check whether we should emit immediately or mark as pending.
+            if last_emit.elapsed() >= BATCH_DELAY {
               self.emit_output();
               last_emit = Instant::now();
-              pending_emission = false;
+            } else {
+              pending_emission = true;
             }
           }
         }
+        recv(self.common.input.sync_rx) -> input => {
+          match input {
+            Ok(ProviderInputMsg::Stop) => {
+              break;
+            }
+            Ok(ProviderInputMsg::Function(
+              ProviderFunction::Audio(audio_function),
+              sender,
+            )) => {
+              let res = self.handle_function(audio_function).map_err(|err| err.to_string());
+              sender.send(res).unwrap();
+            }
+            _ => {}
+          }
+        }
+        recv(batch_timer) -> _ => {
+          if pending_emission {
+            self.emit_output();
+            last_emit = Instant::now();
+            pending_emission = false;
+          }
+        }
       }
+    }
 
-      Ok(())
-    })
+    Ok(())
   }
 
   /// Enumerates active devices of all device types.
