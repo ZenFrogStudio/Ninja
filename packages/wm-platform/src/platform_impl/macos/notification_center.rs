@@ -35,32 +35,51 @@ pub(crate) enum NotificationName {
 
 impl From<&NSNotificationName> for NotificationName {
   fn from(name: &NSNotificationName) -> Self {
+    // SAFETY: `NSWorkspaceDidLaunchApplicationNotification` is an AppKit
+    // extern static that is never mutated and stays alive for the
+    // lifetime of the process.
     if name == unsafe { NSWorkspaceDidLaunchApplicationNotification } {
       Self::WorkspaceDidLaunchApplication
     } else if name
+      // SAFETY: `NSWorkspaceDidActivateApplicationNotification` is an
+      // AppKit extern static, alive for the lifetime of the process.
       == unsafe { NSWorkspaceDidActivateApplicationNotification }
     {
       Self::WorkspaceDidActivateApplication
     } else if name
+      // SAFETY: `NSWorkspaceDidTerminateApplicationNotification` is an
+      // AppKit extern static, alive for the lifetime of the process.
       == unsafe { NSWorkspaceDidTerminateApplicationNotification }
     {
       Self::WorkspaceDidTerminateApplication
     } else if name
+      // SAFETY: `NSWorkspaceActiveSpaceDidChangeNotification` is an
+      // AppKit extern static, alive for the lifetime of the process.
       == unsafe { NSWorkspaceActiveSpaceDidChangeNotification }
     {
       Self::WorkspaceActiveSpaceDidChange
+      // SAFETY: `NSWorkspaceDidHideApplicationNotification` is an AppKit
+      // extern static, alive for the lifetime of the process.
     } else if name == unsafe { NSWorkspaceDidHideApplicationNotification }
     {
       Self::WorkspaceDidHideApplication
     } else if name
+      // SAFETY: `NSWorkspaceDidUnhideApplicationNotification` is an
+      // AppKit extern static, alive for the lifetime of the process.
       == unsafe { NSWorkspaceDidUnhideApplicationNotification }
     {
       Self::WorkspaceDidUnhideApplication
+      // SAFETY: `NSWorkspaceDidWakeNotification` is an AppKit extern
+      // static, alive for the lifetime of the process.
     } else if name == unsafe { NSWorkspaceDidWakeNotification } {
       Self::WorkspaceDidWake
+      // SAFETY: `NSWorkspaceWillSleepNotification` is an AppKit extern
+      // static, alive for the lifetime of the process.
     } else if name == unsafe { NSWorkspaceWillSleepNotification } {
       Self::WorkspaceWillSleep
     } else if name
+      // SAFETY: `NSApplicationDidChangeScreenParametersNotification` is
+      // an AppKit extern static, alive for the lifetime of the process.
       == unsafe { NSApplicationDidChangeScreenParametersNotification }
     {
       Self::ApplicationDidChangeScreenParameters
@@ -73,30 +92,48 @@ impl From<&NSNotificationName> for NotificationName {
 impl From<NotificationName> for &NSString {
   fn from(name: NotificationName) -> Self {
     match name {
+      // SAFETY: `NSWorkspaceActiveSpaceDidChangeNotification` is an
+      // AppKit extern static, alive for the lifetime of the process.
       NotificationName::WorkspaceActiveSpaceDidChange => unsafe {
         NSWorkspaceActiveSpaceDidChangeNotification
       },
+      // SAFETY: `NSWorkspaceDidActivateApplicationNotification` is an
+      // AppKit extern static, alive for the lifetime of the process.
       NotificationName::WorkspaceDidActivateApplication => unsafe {
         NSWorkspaceDidActivateApplicationNotification
       },
+      // SAFETY: `NSWorkspaceDidLaunchApplicationNotification` is an
+      // AppKit extern static, alive for the lifetime of the process.
       NotificationName::WorkspaceDidLaunchApplication => unsafe {
         NSWorkspaceDidLaunchApplicationNotification
       },
+      // SAFETY: `NSWorkspaceDidTerminateApplicationNotification` is an
+      // AppKit extern static, alive for the lifetime of the process.
       NotificationName::WorkspaceDidTerminateApplication => unsafe {
         NSWorkspaceDidTerminateApplicationNotification
       },
+      // SAFETY: `NSWorkspaceDidHideApplicationNotification` is an AppKit
+      // extern static, alive for the lifetime of the process.
       NotificationName::WorkspaceDidHideApplication => unsafe {
         NSWorkspaceDidHideApplicationNotification
       },
+      // SAFETY: `NSWorkspaceDidUnhideApplicationNotification` is an
+      // AppKit extern static, alive for the lifetime of the process.
       NotificationName::WorkspaceDidUnhideApplication => unsafe {
         NSWorkspaceDidUnhideApplicationNotification
       },
+      // SAFETY: `NSWorkspaceDidWakeNotification` is an AppKit extern
+      // static, alive for the lifetime of the process.
       NotificationName::WorkspaceDidWake => unsafe {
         NSWorkspaceDidWakeNotification
       },
+      // SAFETY: `NSWorkspaceWillSleepNotification` is an AppKit extern
+      // static, alive for the lifetime of the process.
       NotificationName::WorkspaceWillSleep => unsafe {
         NSWorkspaceWillSleepNotification
       },
+      // SAFETY: `NSApplicationDidChangeScreenParametersNotification` is
+      // an AppKit extern static, alive for the lifetime of the process.
       NotificationName::ApplicationDidChangeScreenParameters => unsafe {
         NSApplicationDidChangeScreenParametersNotification
       },
@@ -161,6 +198,9 @@ impl NotificationObserver {
         self.emit_event(NotificationEvent::WorkspaceActiveSpaceDidChange);
       }
       NotificationName::WorkspaceDidActivateApplication => {
+        // SAFETY: The notification is an activate notification, whose
+        // `NSWorkspaceApplicationKey` entry AppKit documents as an
+        // `NSRunningApplication`.
         if let Some(app) = unsafe { app_from_notification(notif) } {
           self.emit_event(
             NotificationEvent::WorkspaceDidActivateApplication(app),
@@ -172,6 +212,9 @@ impl NotificationObserver {
         }
       }
       NotificationName::WorkspaceDidLaunchApplication => {
+        // SAFETY: The notification is a launch notification, whose
+        // `NSWorkspaceApplicationKey` entry AppKit documents as an
+        // `NSRunningApplication`.
         if let Some(app) = unsafe { app_from_notification(notif) } {
           self.emit_event(
             NotificationEvent::WorkspaceDidLaunchApplication(app),
@@ -183,6 +226,9 @@ impl NotificationObserver {
         }
       }
       NotificationName::WorkspaceDidTerminateApplication => {
+        // SAFETY: The notification is a terminate notification, whose
+        // `NSWorkspaceApplicationKey` entry AppKit documents as an
+        // `NSRunningApplication`.
         if let Some(app) = unsafe { app_from_notification(notif) } {
           self.emit_event(
             NotificationEvent::WorkspaceDidTerminateApplication(app),
@@ -194,6 +240,9 @@ impl NotificationObserver {
         }
       }
       NotificationName::WorkspaceDidHideApplication => {
+        // SAFETY: The notification is a hide notification, whose
+        // `NSWorkspaceApplicationKey` entry AppKit documents as an
+        // `NSRunningApplication`.
         if let Some(app) = unsafe { app_from_notification(notif) } {
           self.emit_event(NotificationEvent::WorkspaceDidHideApplication(
             app,
@@ -201,6 +250,9 @@ impl NotificationObserver {
         }
       }
       NotificationName::WorkspaceDidUnhideApplication => {
+        // SAFETY: The notification is an unhide notification, whose
+        // `NSWorkspaceApplicationKey` entry AppKit documents as an
+        // `NSRunningApplication`.
         if let Some(app) = unsafe { app_from_notification(notif) } {
           self.emit_event(
             NotificationEvent::WorkspaceDidUnhideApplication(app),
@@ -247,6 +299,12 @@ impl NotificationCenter {
     Self { inner: center }
   }
 
+  /// Registers an observer for the given notification name.
+  ///
+  /// # Safety
+  ///
+  /// `object` must be a valid Objective-C object, and must stay alive for
+  /// as long as it is used as the notification's sender.
   pub unsafe fn add_observer(
     &mut self,
     notification_name: NotificationName,
@@ -255,6 +313,9 @@ impl NotificationCenter {
   ) {
     tracing::info!("Adding observer for {notification_name:?}.");
 
+    // SAFETY: `observer` is a `NotificationObserver`, which defines the
+    // `onEvent:` method with a matching `&NSNotification` signature, and
+    // `object` is a valid sender per this function's contract.
     self.inner.addObserver_selector_name_object(
       observer,
       sel!(onEvent:),
@@ -264,9 +325,21 @@ impl NotificationCenter {
   }
 }
 
+/// Extracts the `NSRunningApplication` that a workspace notification is
+/// about.
+///
+/// # Safety
+///
+/// The notification must be one of the `NSWorkspace` application
+/// notifications (launch, activate, terminate, hide, or unhide), whose
+/// `NSWorkspaceApplicationKey` value is an `NSRunningApplication`. The
+/// cast is unchecked, so any other notification is undefined behaviour.
 pub unsafe fn app_from_notification(
   notification: &NSNotification,
 ) -> Option<Retained<NSRunningApplication>> {
+  // SAFETY: Per this function's contract, the value stored under
+  // `NSWorkspaceApplicationKey` is an `NSRunningApplication`, so the
+  // unchecked cast preserves the object's real class.
   notification
     .userInfo()?
     .objectForKey(ns_string!("NSWorkspaceApplicationKey"))

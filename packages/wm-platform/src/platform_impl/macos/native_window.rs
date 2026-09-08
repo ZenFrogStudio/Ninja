@@ -240,6 +240,10 @@ impl NativeWindow {
         el.get_attribute::<AXUIElement>("AXCloseButton")?;
 
       // Simulate pressing the window's close button.
+      //
+      // SAFETY: `close_button` is a live `AXUIElement` owned by this
+      // scope, and the call runs on the element's thread via
+      // `ThreadBound::with`.
       let result = unsafe {
         close_button.perform_action(&CFString::from_str("AXPress"))
       };
@@ -317,6 +321,9 @@ impl NativeWindow {
       // API. It's also the reason why the Ninja feature of bringing all
       // tiling/floating windows to the front on focus change is not
       // implemented for macOS.
+      //
+      // SAFETY: `el` is the window's live `AXUIElement`, and the call
+      // runs on its thread via `ThreadBound::with`.
       let result =
         unsafe { el.perform_action(&CFString::from_str("AXRaise")) };
 
@@ -335,6 +342,9 @@ impl NativeWindow {
     &self,
     psn: &ffi::ProcessSerialNumber,
   ) -> crate::Result<()> {
+    // SAFETY: `psn` comes from `GetProcessForPID`, so it names a live
+    // process, and the declared signature matches the private SkyLight
+    // export.
     let result = unsafe {
       #[allow(clippy::cast_possible_wrap)]
       ffi::_SLPSSetFrontProcessWithOptions(
@@ -370,6 +380,9 @@ impl NativeWindow {
     event2[0x08] = 0x02;
 
     for event in [event1, event2] {
+      // SAFETY: `psn` comes from `GetProcessForPID`, so it names a live
+      // process, and `event` is the 0x100-byte event record that
+      // SkyLight expects, alive for the duration of the call.
       let result =
         unsafe { ffi::SLPSPostEventRecordTo(psn, event.as_ptr().cast()) };
 
@@ -433,6 +446,8 @@ pub(crate) fn window_from_point(
       y: f64::from(point.y),
     };
 
+    // SAFETY: This closure is run by `dispatch_sync` on the event loop's
+    // main thread, so the `MainThreadMarker` is valid.
     let window_id = unsafe {
       NSWindow::windowNumberAtPoint_belowWindowWithWindowNumber(
         cg_point,

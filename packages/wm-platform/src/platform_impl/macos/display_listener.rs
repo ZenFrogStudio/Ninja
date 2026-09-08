@@ -57,6 +57,9 @@ impl DisplayListener {
 
     // Add observer which will fire when displays are connected and
     // disconnected, resolution changes, or arrangement changes.
+    //
+    // SAFETY: No sender is passed, so `add_observer` has no object to
+    // keep alive.
     unsafe {
       default_center.add_observer(
         NotificationName::ApplicationDidChangeScreenParameters,
@@ -66,6 +69,9 @@ impl DisplayListener {
     }
 
     // Add observers for system sleep and wake events.
+    //
+    // SAFETY: No sender is passed, so `add_observer` has no object to
+    // keep alive.
     unsafe {
       workspace_center.add_observer(
         NotificationName::WorkspaceWillSleep,

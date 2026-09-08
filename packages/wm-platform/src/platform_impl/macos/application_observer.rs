@@ -61,6 +61,11 @@ pub(crate) struct ApplicationObserver {
 }
 
 // TODO: Remove this.
+// SAFETY: `AXObserver` and `CFRunLoopSource` use atomic reference counts,
+// and the only cross-thread use is dropping the observer, which just
+// invalidates the source. Core Foundation documents that as thread-safe.
+// The notification callback always runs on the run loop it was
+// registered on.
 unsafe impl Send for ApplicationObserver {}
 
 impl ApplicationObserver {
@@ -73,6 +78,10 @@ impl ApplicationObserver {
     events_tx: mpsc::UnboundedSender<WindowEvent>,
     is_startup: bool,
   ) -> crate::Result<Self> {
+    // SAFETY: `window_event_callback` has the signature that
+    // `AXObserverCallback` expects, and `CFRetained::retain` is only
+    // reached with a non-null pointer that `AXObserver::create` reported
+    // as successfully created.
     let observer = unsafe {
       let mut observer = std::ptr::null_mut();
 
@@ -107,7 +116,12 @@ impl ApplicationObserver {
     let runloop =
       CFRunLoop::current().ok_or(crate::Error::EventLoopStopped)?;
 
+    // SAFETY: `observer` is a live `AXObserver` retained by this scope,
+    // so the run loop source it owns (`Get` rule) is valid here.
     let observer_source = unsafe { observer.run_loop_source() };
+    // SAFETY: `kCFRunLoopDefaultMode` is a Core Foundation extern static
+    // that is never mutated and stays alive for the lifetime of the
+    // process.
     runloop.add_source(Some(&observer_source), unsafe {
       kCFRunLoopDefaultMode
     });
@@ -159,6 +173,9 @@ impl ApplicationObserver {
     context: *mut ApplicationEventContext,
   ) -> crate::Result<()> {
     for notification in AX_APP_NOTIFICATIONS {
+      // SAFETY: `app.ax_element` is a live `AXUIElement`, and `context`
+      // points to the `ApplicationEventContext` leaked in `new`, so it
+      // stays valid for as long as the notification is registered.
       unsafe {
         let notification_cfstr = CFString::from_static_str(notification);
         let result = observer.add_notification(
@@ -185,6 +202,9 @@ impl ApplicationObserver {
     context: *mut ApplicationEventContext,
   ) -> crate::Result<()> {
     for notification in AX_WINDOW_NOTIFICATIONS {
+      // SAFETY: The window's `AXUIElement` is live, and `context` points
+      // to the `ApplicationEventContext` leaked in `new`, so it stays
+      // valid for as long as the notification is registered.
       unsafe {
         let notification_cfstr = CFString::from_static_str(notification);
         let result = observer.add_notification(
@@ -253,6 +273,13 @@ impl ApplicationObserver {
   }
 
   /// Callback function for accessibility window events.
+  ///
+  /// # Safety
+  ///
+  /// `context` must be the `ApplicationEventContext` pointer registered
+  /// with `AXObserver::add_notification`, and `element` must be the live
+  /// `AXUIElement` that the accessibility API passes in. Only the
+  /// observer's run loop may invoke this.
   #[allow(clippy::too_many_lines)]
   unsafe extern "C-unwind" fn window_event_callback(
     _observer: NonNull<AXObserver>,
@@ -265,7 +292,13 @@ impl ApplicationObserver {
       return;
     }
 
+    // SAFETY: `context` is the leaked `ApplicationEventContext` per this
+    // function's contract, checked non-null above. Callbacks are
+    // serialised on the observer's run loop, so the borrow is unaliased.
     let context = &mut *context.cast::<ApplicationEventContext>();
+    // SAFETY: `element` is the live `AXUIElement` passed in by the
+    // accessibility API, which follows the `Get` rule, so it is retained
+    // here to keep it alive beyond the callback.
     let ax_element = unsafe { CFRetained::retain(element) };
     let notification = WindowEventNotificationInner {
       name: notification_name.as_ref().to_string(),

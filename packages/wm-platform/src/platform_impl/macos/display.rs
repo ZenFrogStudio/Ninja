@@ -281,6 +281,9 @@ impl DisplayDevice {
       let mut displays: Vec<CGDirectDisplayID> = vec![0; 32];
       let mut display_count: u32 = 0;
 
+      // SAFETY: The buffer holds 32 elements and its length is passed as
+      // the maximum count, so `CGGetActiveDisplayList` cannot overrun it.
+      // The count out-parameter points to a local that outlives the call.
       #[allow(clippy::cast_possible_truncation)]
       let result = unsafe {
         CGGetActiveDisplayList(
@@ -328,9 +331,14 @@ impl From<DisplayDevice> for crate::DisplayDevice {
 fn cg_display_uuid(
   cg_display_id: CGDirectDisplayID,
 ) -> crate::Result<CFRetained<CFUUID>> {
+  // SAFETY: `CGDisplayCreateUUIDFromDisplayID` accepts any display ID and
+  // returns null for unknown ones, which the declared signature models as
+  // an `Option`.
   let ptr =
     unsafe { ffi::CGDisplayCreateUUIDFromDisplayID(cg_display_id) };
 
+  // SAFETY: The function follows the `Create` rule, so it returns a +1
+  // reference that `from_raw` takes ownership of without an extra retain.
   ptr.map(|ptr| unsafe { CFRetained::from_raw(ptr) }).ok_or(
     crate::Error::InvalidPointer(
       "Failed to create UUID for display device".to_string(),
@@ -364,6 +372,9 @@ pub(crate) fn all_display_devices(
   let mut cg_display_ids: Vec<CGDirectDisplayID> = vec![0; 32]; // Max 32 displays
   let mut display_count: u32 = 0;
 
+  // SAFETY: The buffer holds 32 elements and its length is passed as the
+  // maximum count, so `CGGetOnlineDisplayList` cannot overrun it. The
+  // count out-parameter points to a local that outlives the call.
   #[allow(clippy::cast_possible_truncation)]
   let result = unsafe {
     CGGetOnlineDisplayList(

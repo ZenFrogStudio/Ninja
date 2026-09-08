@@ -82,6 +82,9 @@ impl EventLoopSource {
   /// Schedules the source on its run loop, so that dispatched callbacks
   /// are able to run.
   fn schedule(&self) {
+    // SAFETY: `kCFRunLoopDefaultMode` is a Core Foundation extern static
+    // that is never mutated and stays alive for the lifetime of the
+    // process.
     self
       .run_loop
       .add_source(Some(&self.source), unsafe { kCFRunLoopDefaultMode });
@@ -139,6 +142,9 @@ impl EventLoopSource {
     let (result_tx, result_rx) = std::sync::mpsc::channel();
 
     self.send_dispatch_sync(|| {
+      // SAFETY: This closure either runs inline on the thread that
+      // created the source, or via the source scheduled by
+      // `add_dispatch_source`. Both are the main thread.
       let mtm = unsafe { MainThreadMarker::new_unchecked() };
 
       // Call `stop()` to mark the run loop for termination.
@@ -161,6 +167,8 @@ impl EventLoopSource {
 // SAFETY: `CFRunLoop` and `CFRunLoopSource` are thread-safe types. The
 // `objc2` bindings don't implement `Send + Sync`.
 unsafe impl Send for EventLoopSource {}
+// SAFETY: Signalling the source and waking the run loop are documented as
+// thread-safe, and the remaining fields are shareable across threads.
 unsafe impl Sync for EventLoopSource {}
 
 /// Platform-specific implementation of [`EventLoop`].
@@ -225,6 +233,10 @@ impl EventLoop {
   extern "C-unwind" fn runloop_signaled_callback(
     info: *mut std::ffi::c_void,
   ) {
+    // SAFETY: `info` is the receiver pointer stored in the
+    // `CFRunLoopSourceContext` in `EventLoopSource::new`. It is only
+    // freed by the release callback, which Core Foundation runs after the
+    // source is invalidated and can no longer perform.
     let callbacks =
       unsafe { &*(info as *const mpsc::Receiver<Box<DispatchFn>>) };
 

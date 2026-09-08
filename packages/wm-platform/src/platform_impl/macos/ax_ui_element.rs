@@ -38,6 +38,8 @@ impl AXUIElementExt for AXUIElement {
   ) -> crate::Result<CFRetained<T>> {
     let mut value: *const CFType = ptr::null();
 
+    // SAFETY: `self` is a live `AXUIElement`, and the out-parameter
+    // points to the `value` local, which outlives the call.
     let result = unsafe {
       self.copy_attribute_value(
         &CFString::from_str(attribute),
@@ -52,6 +54,10 @@ impl AXUIElementExt for AXUIElement {
     }
 
     NonNull::new(value.cast_mut())
+      // SAFETY: `copy_attribute_value` follows the `Copy` rule, so it
+      // returns a +1 reference that `from_raw` takes ownership of without
+      // an extra retain. The caller picks `T`, which must match the
+      // attribute's real type.
       .map(|ptr| unsafe { CFRetained::from_raw(ptr.cast()) })
       .ok_or_else(|| {
         Error::InvalidPointer(
@@ -67,6 +73,8 @@ impl AXUIElementExt for AXUIElement {
     value: &CFRetained<T>,
   ) -> crate::Result<()> {
     let cf_attribute = CFString::from_str(attribute);
+    // SAFETY: `self` is a live `AXUIElement`, and both the attribute name
+    // and the value are owned `CFType`s that outlive the call.
     let result =
       unsafe { self.set_attribute_value(&cf_attribute, value.as_ref()) };
 
@@ -88,6 +96,8 @@ mod tests {
   fn get_attribute_invalid_attribute_is_err() {
     let pid = i32::try_from(std::process::id()).expect("pid overflow");
 
+    // SAFETY: `new_application` accepts any PID and follows the `Create`
+    // rule, so the returned element is owned and released on drop.
     let el = unsafe { AXUIElement::new_application(pid) };
     let result =
       el.get_attribute::<CFString>("AXDefinitelyNotARealAttribute");
@@ -99,6 +109,8 @@ mod tests {
   fn set_attribute_invalid_attribute_is_err() {
     let pid = i32::try_from(std::process::id()).expect("pid overflow");
 
+    // SAFETY: `new_application` accepts any PID and follows the `Create`
+    // rule, so the returned element is owned and released on drop.
     let el = unsafe { AXUIElement::new_application(pid) };
     let value = CFString::from_str("dummy");
     let result = el.set_attribute("AXDefinitelyNotARealAttribute", &value);

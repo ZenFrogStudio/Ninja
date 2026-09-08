@@ -22,6 +22,9 @@ pub struct WindowEventNotificationInner {
   pub ax_element_ptr: *mut std::ffi::c_void,
 }
 
+// SAFETY: `ax_element_ptr` is only carried as an opaque identity token
+// for the element that raised the notification. It is never dereferenced,
+// so moving the notification between threads cannot race.
 unsafe impl Send for WindowEventNotificationInner {}
 
 /// Platform-specific implementation of [`WindowListener`].
@@ -73,6 +76,9 @@ impl WindowListener {
       NotificationName::WorkspaceDidHideApplication,
       NotificationName::WorkspaceDidUnhideApplication,
     ] {
+      // SAFETY: `workspace` is the shared `NSWorkspace` singleton, which
+      // stays alive for the lifetime of the process, satisfying
+      // `add_observer`'s requirement on the sender.
       unsafe {
         workspace_center.add_observer(
           notification,

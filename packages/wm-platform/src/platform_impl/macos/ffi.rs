@@ -36,6 +36,9 @@ pub(crate) struct ProcessInfo {
 
 pub const CPS_USER_GENERATED: u32 = 0x200;
 
+// SAFETY: These signatures match the ones exported by the
+// `ApplicationServices` framework, which is linked into every macOS
+// process.
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
   // Deprecated in macOS 10.9 in late 2014, but still works fine.
@@ -57,6 +60,8 @@ unsafe extern "C" {
   ) -> Option<NonNull<CFUUID>>;
 }
 
+// SAFETY: This signature matches the private `_AXUIElementGetWindow`
+// export of the accessibility framework, which is already linked in.
 unsafe extern "C" {
   pub(crate) fn _AXUIElementGetWindow(
     elem: NonNull<AXUIElement>,
@@ -64,6 +69,9 @@ unsafe extern "C" {
   ) -> AXError;
 }
 
+// SAFETY: These signatures match the private exports of the `SkyLight`
+// framework, which backs the window server on all supported macOS
+// versions.
 #[link(name = "SkyLight", kind = "framework")]
 unsafe extern "C" {
   pub(crate) fn _SLPSSetFrontProcessWithOptions(
