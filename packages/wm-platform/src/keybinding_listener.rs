@@ -2,7 +2,7 @@ use std::{
   collections::HashMap,
   sync::{
     atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
+    Arc, Mutex, PoisonError,
   },
 };
 
@@ -123,11 +123,13 @@ impl KeybindingListener {
 
   /// Updates the keybindings for the keybinding listener.
   ///
-  /// # Panics
-  ///
-  /// If the internal mutex is poisoned.
+  /// A poisoned mutex is recovered from, since the map is replaced
+  /// wholesale here and stale keybindings are worse than a torn read.
   pub fn update(&self, keybindings: &[Keybinding]) {
-    *self.keybinding_map.lock().unwrap() =
+    *self
+      .keybinding_map
+      .lock()
+      .unwrap_or_else(PoisonError::into_inner) =
       Self::create_keybinding_map(keybindings);
   }
 

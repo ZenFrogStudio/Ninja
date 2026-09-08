@@ -1,6 +1,6 @@
 use std::{
   ptr::NonNull,
-  sync::{Arc, Mutex},
+  sync::{Arc, Mutex, MutexGuard, PoisonError},
 };
 
 use objc2_application_services::{AXError, AXObserver, AXUIElement};
@@ -29,6 +29,17 @@ const AX_WINDOW_NOTIFICATIONS: &[&str] = &[
   "AXWindowDeminiaturized",
   "AXWindowMiniaturized",
 ];
+
+/// Locks a list of application windows, recovering from a poisoned mutex.
+///
+/// The mutex guards a plain vector, so a panic elsewhere leaves the list
+/// itself intact. Recovering keeps window events flowing instead of
+/// poisoning every later observer callback.
+fn lock_windows(
+  app_windows: &Mutex<Vec<crate::NativeWindow>>,
+) -> MutexGuard<'_, Vec<crate::NativeWindow>> {
+  app_windows.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// Context passed to the application event callback.
 #[derive(Debug)]
@@ -106,7 +117,7 @@ impl ApplicationObserver {
     Self::register_app_notifications(app, &observer, context)?;
 
     // Emit `WindowEvent::Shown` for all existing windows.
-    for window in app_windows.lock().unwrap().iter() {
+    for window in lock_windows(&app_windows).iter() {
       if let Err(err) =
         Self::register_window_notifications(window, &observer, context)
       {
@@ -197,7 +208,7 @@ impl ApplicationObserver {
   }
 
   pub(crate) fn emit_all_windows_destroyed(&self) {
-    for window in self.app_windows.lock().unwrap().iter() {
+    for window in lock_windows(&self.app_windows).iter() {
       if let Err(err) = self.events_tx.send(WindowEvent::Destroyed {
         window_id: window.id(),
         notification: crate::WindowEventNotification(None),
@@ -212,7 +223,7 @@ impl ApplicationObserver {
   }
 
   pub(crate) fn emit_all_windows_hidden(&self) {
-    for window in self.app_windows.lock().unwrap().iter() {
+    for window in lock_windows(&self.app_windows).iter() {
       if let Err(err) = self.events_tx.send(WindowEvent::Hidden {
         window: window.clone(),
         notification: crate::WindowEventNotification(None),
@@ -227,7 +238,7 @@ impl ApplicationObserver {
   }
 
   pub(crate) fn emit_all_windows_shown(&self) {
-    for window in self.app_windows.lock().unwrap().iter() {
+    for window in lock_windows(&self.app_windows).iter() {
       if let Err(err) = self.events_tx.send(WindowEvent::Shown {
         window: window.clone(),
         notification: crate::WindowEventNotification(None),
@@ -268,7 +279,7 @@ impl ApplicationObserver {
     );
 
     let found_window = {
-      let app_windows = context.app_windows.lock().unwrap();
+      let app_windows = lock_windows(&context.app_windows);
 
       app_windows
         .iter()
@@ -280,10 +291,7 @@ impl ApplicationObserver {
 
     if notification.name.as_str() == "AXUIElementDestroyed" {
       if let Some(window) = &found_window {
-        context
-          .app_windows
-          .lock()
-          .unwrap()
+        lock_windows(&context.app_windows)
           .retain(|w| w.id() != window.id());
 
         if let Err(err) = context.events_tx.send(WindowEvent::Destroyed {
@@ -313,7 +321,7 @@ impl ApplicationObserver {
     });
 
     if is_new_window {
-      context.app_windows.lock().unwrap().push(window.clone());
+      lock_windows(&context.app_windows).push(window.clone());
       let _ = Self::register_window_notifications(
         &window,
         &context.observer.clone(),
