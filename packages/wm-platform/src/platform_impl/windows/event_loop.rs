@@ -54,6 +54,24 @@ pub(crate) struct EventLoopSource {
 }
 
 impl EventLoopSource {
+  /// Creates an inert source for use in tests.
+  ///
+  /// The source has no message window behind it, so cross-thread
+  /// dispatches fail instead of being delivered. Dispatches from the
+  /// creating thread run inline.
+  // LINT: Only used by `test_utils`, which the `src/test.rs` target does
+  // not compile.
+  #[cfg(feature = "test_utils")]
+  #[allow(dead_code)]
+  pub(crate) fn mock() -> Self {
+    Self {
+      message_window_handle: 0,
+      thread_id: thread::current().id(),
+      os_thread_id: 0,
+      next_callback_id: Arc::new(AtomicUsize::new(0)),
+    }
+  }
+
   pub(crate) fn send_dispatch_async<F>(
     &self,
     dispatch_fn: F,
@@ -180,7 +198,7 @@ impl EventLoop {
     };
 
     let stopped = Arc::new(AtomicBool::new(false));
-    let dispatcher = Dispatcher::new(Some(source.clone()), stopped);
+    let dispatcher = Dispatcher::new(source.clone(), stopped);
 
     Ok((Self { source }, dispatcher))
   }

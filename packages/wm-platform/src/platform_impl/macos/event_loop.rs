@@ -22,6 +22,71 @@ pub(crate) struct EventLoopSource {
 }
 
 impl EventLoopSource {
+  /// Creates a source for dispatching callbacks onto the current thread's
+  /// run loop.
+  ///
+  /// The source is not scheduled on the run loop yet, so `schedule` must
+  /// be called before dispatched callbacks are able to run.
+  fn new() -> crate::Result<Self> {
+    let (dispatch_tx, dispatch_rx) = mpsc::channel();
+    let dispatch_rx_ptr =
+      Box::into_raw(Box::new(dispatch_rx)).cast::<std::ffi::c_void>();
+
+    // Create `CFRunLoopSource` context.
+    let mut context = CFRunLoopSourceContext {
+      version: 0,
+      info: dispatch_rx_ptr,
+      retain: None,
+      release: Some(EventLoop::runloop_source_released_callback),
+      copyDescription: None,
+      equal: None,
+      hash: None,
+      schedule: None,
+      cancel: None,
+      perform: Some(EventLoop::runloop_signaled_callback),
+    };
+
+    // SAFETY: The receiver behind `info` stays alive until the source is
+    // released, at which point the release callback frees it.
+    let source =
+      unsafe { CFRunLoopSource::new(None, 0, &raw mut context) }.ok_or(
+        crate::Error::Platform(
+          "Failed to create run loop source.".to_string(),
+        ),
+      )?;
+
+    let run_loop =
+      CFRunLoop::current().ok_or(crate::Error::EventLoopStopped)?;
+
+    Ok(Self {
+      dispatch_tx,
+      source,
+      run_loop,
+      thread_id: std::thread::current().id(),
+    })
+  }
+
+  /// Creates an inert source for use in tests.
+  ///
+  /// The source is never scheduled on a run loop, so cross-thread
+  /// dispatches are queued but never run. Dispatches from the creating
+  /// thread run inline.
+  // LINT: Only used by `test_utils`, which the `src/test.rs` target does
+  // not compile.
+  #[cfg(feature = "test_utils")]
+  #[allow(dead_code)]
+  pub(crate) fn mock() -> crate::Result<Self> {
+    Self::new()
+  }
+
+  /// Schedules the source on its run loop, so that dispatched callbacks
+  /// are able to run.
+  fn schedule(&self) {
+    self
+      .run_loop
+      .add_source(Some(&self.source), unsafe { kCFRunLoopDefaultMode });
+  }
+
   pub(crate) fn send_dispatch_async<F>(
     &self,
     dispatch_fn: F,
@@ -111,8 +176,7 @@ impl EventLoop {
     let source = Self::add_dispatch_source()?;
 
     let stopped = Arc::new(AtomicBool::new(false));
-    let dispatcher =
-      Dispatcher::new(Some(source.clone()), stopped.clone());
+    let dispatcher = Dispatcher::new(source.clone(), stopped.clone());
 
     Ok((
       Self {
@@ -151,43 +215,10 @@ impl EventLoop {
     let ns_app = NSApplication::sharedApplication(mtm);
     ns_app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
 
-    let (dispatch_tx, dispatch_rx) = mpsc::channel();
-    let dispatch_rx_ptr =
-      Box::into_raw(Box::new(dispatch_rx)).cast::<std::ffi::c_void>();
+    let source = EventLoopSource::new()?;
+    source.schedule();
 
-    // Create `CFRunLoopSource` context.
-    let mut context = CFRunLoopSourceContext {
-      version: 0,
-      info: dispatch_rx_ptr,
-      retain: None,
-      release: Some(Self::runloop_source_released_callback),
-      copyDescription: None,
-      equal: None,
-      hash: None,
-      schedule: None,
-      cancel: None,
-      perform: Some(Self::runloop_signaled_callback),
-    };
-
-    // Create the run loop source.
-    let source =
-      unsafe { CFRunLoopSource::new(None, 0, &raw mut context) }.ok_or(
-        crate::Error::Platform(
-          "Failed to create run loop source.".to_string(),
-        ),
-      )?;
-
-    let run_loop =
-      CFRunLoop::current().ok_or(crate::Error::EventLoopStopped)?;
-
-    run_loop.add_source(Some(&source), unsafe { kCFRunLoopDefaultMode });
-
-    Ok(EventLoopSource {
-      dispatch_tx,
-      source,
-      run_loop,
-      thread_id: std::thread::current().id(),
-    })
+    Ok(source)
   }
 
   // This function is called by the `CFRunLoopSource` when signaled.

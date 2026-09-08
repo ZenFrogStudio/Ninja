@@ -183,26 +183,18 @@ pub trait DispatcherExtWindows {
 #[cfg(target_os = "windows")]
 impl DispatcherExtWindows for Dispatcher {
   fn message_window_handle(&self) -> isize {
-    self.source.as_ref().unwrap().message_window_handle
+    self.source.message_window_handle
   }
 
   fn register_wndproc_callback(
     &self,
     callback: Box<crate::WndProcCallback>,
   ) -> crate::Result<usize> {
-    self
-      .source
-      .as_ref()
-      .unwrap()
-      .register_wndproc_callback(callback)
+    self.source.register_wndproc_callback(callback)
   }
 
   fn deregister_wndproc_callback(&self, id: usize) -> crate::Result<()> {
-    self
-      .source
-      .as_ref()
-      .unwrap()
-      .deregister_wndproc_callback(id)
+    self.source.deregister_wndproc_callback(id)
   }
 
   fn window_animations_enabled(&self) -> crate::Result<bool> {
@@ -345,15 +337,17 @@ impl DispatcherExtWindows for Dispatcher {
 /// ```
 #[derive(Clone)]
 pub struct Dispatcher {
-  source: Option<platform_impl::EventLoopSource>,
+  source: platform_impl::EventLoopSource,
   stopped: Arc<AtomicBool>,
 }
 
 impl Dispatcher {
-  // TODO: Allow for source to be resolved after creation when used via
-  // `EventLoopInstaller` (to be added).
+  /// Creates a dispatcher for the given event loop source.
+  ///
+  /// The `stopped` flag is shared with the event loop, so that dispatches
+  /// are rejected once it has been asked to stop.
   pub(crate) fn new(
-    source: Option<platform_impl::EventLoopSource>,
+    source: platform_impl::EventLoopSource,
     stopped: Arc<AtomicBool>,
   ) -> Self {
     Self { source, stopped }
@@ -368,9 +362,7 @@ impl Dispatcher {
     self.stopped.store(true, Ordering::SeqCst);
 
     // Signal platform-specific event loop to stop.
-    if let Some(source) = &self.source {
-      source.send_stop()?;
-    }
+    self.source.send_stop()?;
 
     Ok(())
   }
@@ -397,14 +389,12 @@ impl Dispatcher {
       return Ok(());
     }
 
-    if let Some(source) = &self.source {
-      // Platform-specific behavior:
-      // * On Windows, this uses `PostMessageW` to send callbacks via
-      //   window messages.
-      // * On macOS, this uses `CFRunLoopSourceSignal` to wake the run loop
-      //   and process callbacks.
-      source.send_dispatch_async(dispatch_fn)?;
-    }
+    // Platform-specific behavior:
+    // * On Windows, this uses `PostMessageW` to send callbacks via window
+    //   messages.
+    // * On macOS, this uses `CFRunLoopSourceSignal` to wake the run loop
+    //   and process callbacks.
+    self.source.send_dispatch_async(dispatch_fn)?;
 
     Ok(())
   }
@@ -415,7 +405,6 @@ impl Dispatcher {
   /// executed directly.
   ///
   /// Returns a `Result` with the closure's return value.
-  #[allow(clippy::missing_panics_doc)]
   pub fn dispatch_sync<F, R>(&self, dispatch_fn: F) -> crate::Result<R>
   where
     F: FnOnce() -> R + Send,
@@ -433,8 +422,7 @@ impl Dispatcher {
 
     let (result_tx, result_rx) = std::sync::mpsc::channel();
 
-    // TODO: Block until event loop source is set.
-    self.source.as_ref().unwrap().send_dispatch_sync(move || {
+    self.source.send_dispatch_sync(move || {
       let result = dispatch_fn();
 
       if result_tx.send(result).is_err() {
@@ -448,11 +436,9 @@ impl Dispatcher {
   }
 
   /// Gets the thread ID of the event loop thread.
-  #[allow(clippy::missing_panics_doc)]
   #[must_use]
   pub fn thread_id(&self) -> ThreadId {
-    // TODO: Block until event loop source is set.
-    self.source.as_ref().unwrap().thread_id
+    self.source.thread_id
   }
 
   /// Gets whether the current thread is the event loop thread.
