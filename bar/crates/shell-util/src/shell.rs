@@ -6,7 +6,7 @@ use std::{
   ffi::OsStr,
   io::Write,
   process::{Command, Stdio},
-  sync::{Arc, RwLock},
+  sync::{Arc, PoisonError, RwLock},
   thread::spawn,
 };
 
@@ -329,7 +329,12 @@ impl Shell {
 
     spawn(move || {
       let status = child_.wait();
-      let _lock = guard.write().unwrap();
+
+      // The guard only orders the `Terminated` event after the pipe
+      // readers have drained. A poisoned guard means a reader thread
+      // panicked and that ordering is already lost, so recovering here is
+      // no worse than blocking the exit status forever.
+      let _lock = guard.write().unwrap_or_else(PoisonError::into_inner);
 
       let event = match status {
         Ok(status) => ChildProcessEvent::Terminated(ExitStatus {
@@ -397,7 +402,10 @@ impl Shell {
     F: Fn(Buffer) -> ChildProcessEvent + Send + Copy + 'static,
   {
     spawn(move || {
-      let _lock = guard.read().unwrap();
+      // A poisoned guard only means the ordering against the `Terminated`
+      // event is already lost, so draining the pipe anyway is safe.
+      let _lock = guard.read().unwrap_or_else(PoisonError::into_inner);
+
       let mut reader = StdoutReader::new(pipe, encoding);
 
       while let Ok(Some(buffer)) = reader.read_next() {
