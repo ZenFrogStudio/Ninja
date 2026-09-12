@@ -32,7 +32,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 shell-util = { path = "../../crates/shell-util" }
 starship-battery = "0.8"
-sysinfo = "0.30"
+sysinfo = "0.37.2"
 tauri = { version = "2", features = [
   "devtools",
   "macos-private-api",
@@ -50,10 +50,10 @@ tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { workspace = true }
 wm-common = { path = "../../../packages/wm-common" }
-wm-ipc-client = { path = "../../../packages/wm-ipc-client" }
 wm = { path = "../../../packages/wm" }
 wm-cli = { path = "../../../packages/wm-cli" }
 wm-platform = { path = "../../../packages/wm-platform" }
+which = "8"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 systray-util = { path = "../../crates/systray-util" }

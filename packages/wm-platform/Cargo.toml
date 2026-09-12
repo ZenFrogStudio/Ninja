@@ -55,8 +55,10 @@ windows-interface = { version = "0.58" }
 # The `windows_interface::interface` macro expands to code that names
 # `windows_core` directly, so it has to be in scope as its own crate.
 windows-core = { workspace = true }
+winreg = "0.55"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+auto-launch = "0.5"
 objc2-core-graphics = "0.3.2"
 objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = [
@@ -86,3 +88,6 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = [
   "NSThread",
   "NSValue",
 ] }
+
+[lints]
+workspace = true

@@ -31,6 +31,11 @@ impl<R: Runtime> WindowExtWindows for Window<R> {
     // `WS_EX_APPWINDOW` style to hide a window from the taskbar. Oddly
     // enough, this was causing the `WS_EX_APPWINDOW` style to be
     // preserved unless fully overwriting the extended window style.
+    //
+    // SAFETY: `handle` belongs to this window, which Tauri keeps alive
+    // for as long as the `Window` this method is called on. `GWL_EXSTYLE`
+    // stores a plain style bitmask, not a pointer, so overwriting it
+    // cannot invalidate anything the window subclass relies on.
     unsafe {
       match enable {
         true => SetWindowLongPtrW(

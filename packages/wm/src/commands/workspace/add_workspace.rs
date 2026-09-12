@@ -36,12 +36,24 @@ pub fn add_workspace(
     anyhow::bail!("Workspace '{name}' is already active.");
   }
 
-  let bind_to_monitor = u32::try_from(monitor.index())
-    .context("Monitor index out of range.")?;
+  // Bind to the panel itself where the platform can identify it, so the
+  // workspace comes back to the same screen after the displays are
+  // rearranged. The monitor index is a position, and only stands in when
+  // there's no stable id to be had.
+  let bind_to_monitor_id = monitor.stable_id();
+
+  let bind_to_monitor = match bind_to_monitor_id {
+    Some(_) => None,
+    None => Some(
+      u32::try_from(monitor.index())
+        .context("Monitor index out of range.")?,
+    ),
+  };
 
   let stored = StoredWorkspace {
     name: name.clone(),
-    bind_to_monitor: Some(bind_to_monitor),
+    bind_to_monitor,
+    bind_to_monitor_id,
   };
 
   workspace_store::add(&config.path, stored.clone())?;
@@ -50,7 +62,7 @@ pub fn add_workspace(
   // like a declared one for the rest of the session without a reload.
   workspace_store::merge_into(&mut config.value.workspaces, &[stored]);
 
-  info!("Adding workspace '{name}' bound to monitor {bind_to_monitor}.");
+  info!("Adding workspace '{name}' bound to monitor {monitor}.");
 
   activate_workspace(Some(&name), Some(monitor), state, config)?;
 

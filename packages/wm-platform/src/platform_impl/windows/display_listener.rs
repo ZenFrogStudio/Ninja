@@ -113,10 +113,10 @@ impl DisplayListener {
             let wparam = wparam as u32;
 
             if wparam == PBT_POWERSETTINGCHANGE {
-              // SAFETY: `lparam` points to a `POWERBROADCAST_SETTING` for
-              // the duration of the message, as documented for
-              // `PBT_POWERSETTINGCHANGE`.
               if let Some(state) =
+                // SAFETY: `lparam` points to a `POWERBROADCAST_SETTING`
+                // for the duration of the message, as documented for
+                // `PBT_POWERSETTINGCHANGE`.
                 unsafe { display_state_from_message(lparam) }
               {
                 let is_off = state == DISPLAY_STATE_OFF;
@@ -227,6 +227,9 @@ impl DisplayListener {
     // Windows sends immediately on registration, isn't missed.
     let display_state_guid = GUID_CONSOLE_DISPLAY_STATE;
 
+    // SAFETY: The handle is the event loop's message window, which
+    // outlives this listener, and `display_state_guid` is a live local
+    // that the OS only reads during the call.
     let power_notify = unsafe {
       RegisterPowerSettingNotification(
         HANDLE(dispatcher.message_window_handle() as *mut std::ffi::c_void),
@@ -249,6 +252,8 @@ impl DisplayListener {
     }
 
     if let Some(power_notify) = self.power_notify.take() {
+      // SAFETY: The registration was made in `new` and is owned by this
+      // listener. `take` clears it first, so it is unregistered once.
       unsafe { UnregisterPowerSettingNotification(power_notify) }?;
     }
 

@@ -94,10 +94,14 @@ impl DispatcherExtMacOs for Dispatcher {
 
   fn has_ax_permission(&self, prompt: bool) -> bool {
     let options = CFDictionary::from_slices(
+      // SAFETY: `kAXTrustedCheckOptionPrompt` is a constant string
+      // exported by `ApplicationServices` and lives for the program.
       &[unsafe { kAXTrustedCheckOptionPrompt }],
       &[CFBoolean::new(prompt)],
     );
 
+    // SAFETY: `options` is a valid `CFDictionary` that outlives the call,
+    // and holds the one key this API accepts.
     unsafe { AXIsProcessTrustedWithOptions(Some(options.as_ref())) }
   }
 }
@@ -183,26 +187,18 @@ pub trait DispatcherExtWindows {
 #[cfg(target_os = "windows")]
 impl DispatcherExtWindows for Dispatcher {
   fn message_window_handle(&self) -> isize {
-    self.source.as_ref().unwrap().message_window_handle
+    self.source.message_window_handle
   }
 
   fn register_wndproc_callback(
     &self,
     callback: Box<crate::WndProcCallback>,
   ) -> crate::Result<usize> {
-    self
-      .source
-      .as_ref()
-      .unwrap()
-      .register_wndproc_callback(callback)
+    self.source.register_wndproc_callback(callback)
   }
 
   fn deregister_wndproc_callback(&self, id: usize) -> crate::Result<()> {
-    self
-      .source
-      .as_ref()
-      .unwrap()
-      .deregister_wndproc_callback(id)
+    self.source.deregister_wndproc_callback(id)
   }
 
   fn window_animations_enabled(&self) -> crate::Result<bool> {
@@ -212,6 +208,9 @@ impl DispatcherExtWindows for Dispatcher {
       iMinAnimate: 0,
     };
 
+    // SAFETY: `animation_info` is a live local for the call, and its
+    // `cbSize` tells `SystemParametersInfoW` exactly how much of it may be
+    // written, so the write stays in bounds.
     unsafe {
       SystemParametersInfoW(
         SPI_GETANIMATION,
@@ -234,6 +233,9 @@ impl DispatcherExtWindows for Dispatcher {
       iMinAnimate: i32::from(enable),
     };
 
+    // SAFETY: `animation_info` is a live local for the call, and its
+    // `cbSize` tells `SystemParametersInfoW` exactly how much of it may be
+    // read, so the read stays in bounds.
     unsafe {
       SystemParametersInfoW(
         SPI_SETANIMATION,
@@ -250,6 +252,8 @@ impl DispatcherExtWindows for Dispatcher {
     let wide_input =
       input.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
 
+    // SAFETY: `wide_input` is null-terminated and outlives the call, and
+    // passing no output buffer asks only for the required length.
     let size = unsafe {
       ExpandEnvironmentStringsW(PCWSTR(wide_input.as_ptr()), None)
     };
@@ -261,6 +265,9 @@ impl DispatcherExtWindows for Dispatcher {
     }
 
     let mut buffer = vec![0u16; size as usize];
+    // SAFETY: `wide_input` is null-terminated and outlives the call, and
+    // `buffer` was sized to the length the first call asked for, so the
+    // slice bounds the write.
     let size = unsafe {
       ExpandEnvironmentStringsW(
         PCWSTR(wide_input.as_ptr()),
@@ -308,6 +315,9 @@ impl DispatcherExtWindows for Dispatcher {
       ..Default::default()
     };
 
+    // SAFETY: `exec_info` and the three wide strings it points at are
+    // live locals that outlive the call, and `SEE_MASK_NOASYNC` keeps the
+    // call synchronous so nothing is read after they are dropped.
     unsafe { ShellExecuteExW(&raw mut exec_info) }
       .map_err(crate::Error::from)
   }
@@ -345,15 +355,17 @@ impl DispatcherExtWindows for Dispatcher {
 /// ```
 #[derive(Clone)]
 pub struct Dispatcher {
-  source: Option<platform_impl::EventLoopSource>,
+  source: platform_impl::EventLoopSource,
   stopped: Arc<AtomicBool>,
 }
 
 impl Dispatcher {
-  // TODO: Allow for source to be resolved after creation when used via
-  // `EventLoopInstaller` (to be added).
+  /// Creates a dispatcher for the given event loop source.
+  ///
+  /// The `stopped` flag is shared with the event loop, so that dispatches
+  /// are rejected once it has been asked to stop.
   pub(crate) fn new(
-    source: Option<platform_impl::EventLoopSource>,
+    source: platform_impl::EventLoopSource,
     stopped: Arc<AtomicBool>,
   ) -> Self {
     Self { source, stopped }
@@ -368,9 +380,7 @@ impl Dispatcher {
     self.stopped.store(true, Ordering::SeqCst);
 
     // Signal platform-specific event loop to stop.
-    if let Some(source) = &self.source {
-      source.send_stop()?;
-    }
+    self.source.send_stop()?;
 
     Ok(())
   }
@@ -397,14 +407,12 @@ impl Dispatcher {
       return Ok(());
     }
 
-    if let Some(source) = &self.source {
-      // Platform-specific behavior:
-      // * On Windows, this uses `PostMessageW` to send callbacks via
-      //   window messages.
-      // * On macOS, this uses `CFRunLoopSourceSignal` to wake the run loop
-      //   and process callbacks.
-      source.send_dispatch_async(dispatch_fn)?;
-    }
+    // Platform-specific behavior:
+    // * On Windows, this uses `PostMessageW` to send callbacks via window
+    //   messages.
+    // * On macOS, this uses `CFRunLoopSourceSignal` to wake the run loop
+    //   and process callbacks.
+    self.source.send_dispatch_async(dispatch_fn)?;
 
     Ok(())
   }
@@ -415,7 +423,6 @@ impl Dispatcher {
   /// executed directly.
   ///
   /// Returns a `Result` with the closure's return value.
-  #[allow(clippy::missing_panics_doc)]
   pub fn dispatch_sync<F, R>(&self, dispatch_fn: F) -> crate::Result<R>
   where
     F: FnOnce() -> R + Send,
@@ -433,8 +440,7 @@ impl Dispatcher {
 
     let (result_tx, result_rx) = std::sync::mpsc::channel();
 
-    // TODO: Block until event loop source is set.
-    self.source.as_ref().unwrap().send_dispatch_sync(move || {
+    self.source.send_dispatch_sync(move || {
       let result = dispatch_fn();
 
       if result_tx.send(result).is_err() {
@@ -448,11 +454,9 @@ impl Dispatcher {
   }
 
   /// Gets the thread ID of the event loop thread.
-  #[allow(clippy::missing_panics_doc)]
   #[must_use]
   pub fn thread_id(&self) -> ThreadId {
-    // TODO: Block until event loop source is set.
-    self.source.as_ref().unwrap().thread_id
+    self.source.thread_id
   }
 
   /// Gets whether the current thread is the event loop thread.
@@ -603,6 +607,8 @@ impl Dispatcher {
     #[cfg(target_os = "windows")]
     {
       let mut point = POINT { x: 0, y: 0 };
+      // SAFETY: `point` is a live, initialised local that outlives the
+      // call, and is the only thing written to.
       unsafe { GetCursorPos(&raw mut point) }?;
 
       Ok(Point {
@@ -635,6 +641,9 @@ impl Dispatcher {
       };
 
       // High-order bit set indicates the key is currently down.
+      // SAFETY: `GetAsyncKeyState` takes a virtual-key code by value and
+      // touches no caller memory. `vk_code` is one of the two mouse
+      // button codes above, so it is in range.
       let state = unsafe { GetAsyncKeyState(vk_code.into()) };
       (state.cast_unsigned() & 0x8000u16) != 0
     }
@@ -665,6 +674,8 @@ impl Dispatcher {
     }
     #[cfg(target_os = "windows")]
     {
+      // SAFETY: `SetCursorPos` takes its coordinates by value and touches
+      // no caller memory.
       unsafe { SetCursorPos(point.x, point.y) }?;
     }
 
@@ -713,6 +724,8 @@ impl Dispatcher {
       let message_wide =
         message.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
 
+      // SAFETY: Both wide strings are null-terminated and live for the
+      // whole call, which blocks until the dialog is dismissed.
       unsafe {
         MessageBoxW(
           None,

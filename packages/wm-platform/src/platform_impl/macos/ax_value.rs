@@ -61,6 +61,9 @@ impl AXValueExt for AXValue {
         crate::Error::InvalidPointer("Value pointer is null".to_string())
       })?;
 
+    // SAFETY: `ptr` points to the borrowed `val`, whose layout matches
+    // `T::AX_TYPE` per its `AXValueTypeMarker` impl. `AXValueCreate`
+    // copies the bytes, so the pointer need not outlive the call.
     unsafe { AXValue::new(T::AX_TYPE, ptr) }.ok_or_else(|| {
       crate::Error::AXValueCreation(format!(
         "Failed to create AXValue for type with AX_TYPE {:?}",
@@ -78,9 +81,14 @@ impl AXValueExt for AXValue {
         )
       })?;
 
+    // SAFETY: `ptr` points to the `value` buffer, which is sized for `T`
+    // and matches `T::AX_TYPE` per its `AXValueTypeMarker` impl, so
+    // `AXValueGetValue` cannot write out of bounds.
     let success = unsafe { self.value(T::AX_TYPE, ptr) };
 
     if success {
+      // SAFETY: `AXValueGetValue` reported success, so it filled the
+      // whole buffer with a valid `T`.
       Ok(unsafe { value.assume_init() })
     } else {
       Err(crate::Error::AXValueCreation(format!(

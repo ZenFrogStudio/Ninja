@@ -36,6 +36,15 @@ export function WidgetPage() {
     ),
   );
 
+  // Pack and widget config together, so the page renders only when both
+  // are resolved.
+  const selection = createMemo(() => {
+    const pack = selectedPack();
+    const config = selectedConfig();
+
+    return pack && config ? { pack, config } : undefined;
+  });
+
   const [selectedPreset, setSelectedPreset] = createSignal<string | null>(
     null,
   );
@@ -49,7 +58,7 @@ export function WidgetPage() {
     const packId = selectedPack()?.id;
     const widgetName = selectedConfig()?.name;
 
-    return Object.values(widgetStates()).filter(
+    return Object.values(widgetStates() ?? {}).filter(
       state => state.name === widgetName && state.packId === packId,
     );
   });
@@ -68,8 +77,10 @@ export function WidgetPage() {
     on(
       () => selectedPack()?.id,
       (id, prevId) => {
-        if (id !== prevId && selectedConfig()) {
-          setSelectedPreset(selectedConfig().presets[0]?.name ?? null);
+        const config = selectedConfig();
+
+        if (id !== prevId && config) {
+          setSelectedPreset(config.presets[0]?.name ?? null);
           document.querySelector('#form-container')?.scrollTo(0, 0);
         }
       },
@@ -81,7 +92,9 @@ export function WidgetPage() {
     on(
       () => presetNames(),
       presetNames => {
-        if (!selectedPreset() || !presetNames.includes(selectedPreset())) {
+        const preset = selectedPreset();
+
+        if (!preset || !presetNames.includes(preset)) {
           setSelectedPreset(presetNames[0] ?? null);
         }
       },
@@ -90,33 +103,35 @@ export function WidgetPage() {
 
   return (
     <div class="flex h-screen bg-background">
-      <Show when={selectedConfig()}>
-        {config => (
+      <Show when={selection()}>
+        {selected => (
           <main class="flex-1 grid grid-rows-[1fr_auto] overflow-hidden">
             <div id="form-container" class="container p-4 overflow-y-auto">
               <AppBreadcrumbs
                 entries={[
                   {
-                    href: `/packs/${selectedPack().id}`,
-                    content: selectedPack().id,
+                    href: `/packs/${selected().pack.id}`,
+                    content: selected().pack.id,
                   },
                   {
-                    href: `/packs/${selectedPack().id}/widgets/${config().name}`,
-                    content: config().name,
+                    href: `/packs/${selected().pack.id}/widgets/${selected().config.name}`,
+                    content: selected().config.name,
                   },
                 ]}
               />
 
-              <h1 class="text-3xl font-bold mb-4">{config().name}</h1>
+              <h1 class="text-3xl font-bold mb-4">
+                {selected().config.name}
+              </h1>
 
               <WidgetConfigForm
-                config={config()}
-                packId={selectedPack().id}
-                disabled={selectedPack().type === 'marketplace'}
+                config={selected().config}
+                packId={selected().pack.id}
+                disabled={selected().pack.type === 'marketplace'}
                 onChange={form => {
                   if (form.isDirty() && !form.hasError()) {
                     updateWidgetConfig(
-                      selectedPack().id,
+                      selected().pack.id,
                       form.value.name,
                       form.value,
                     );
@@ -136,13 +151,17 @@ export function WidgetPage() {
                 <Button
                   class="rounded-r-none self-end"
                   disabled={presetNames().length === 0}
-                  onClick={() =>
-                    togglePreset(
-                      selectedPack().id,
-                      config().name,
-                      selectedPreset(),
-                    )
-                  }
+                  onClick={() => {
+                    const preset = selectedPreset();
+
+                    if (preset) {
+                      togglePreset(
+                        selected().pack.id,
+                        selected().config.name,
+                        preset,
+                      );
+                    }
+                  }}
                 >
                   <Show when={selectedPreset()} fallback="No presets">
                     {selectedPresetStates().length === 0

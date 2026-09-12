@@ -7,8 +7,7 @@ import {
   AlertDialogClose,
   AlertDialogAction,
 } from '@glzr/components';
-
-import { WidgetPack } from '~/common';
+import type { WidgetPack } from 'ninja';
 
 export interface DeleteWidgetPackDialogProps {
   pack: WidgetPack;

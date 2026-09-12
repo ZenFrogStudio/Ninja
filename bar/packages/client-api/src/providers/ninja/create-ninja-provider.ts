@@ -105,17 +105,30 @@ export function createNinjaProvider(
           workspace => workspace.isDisplayed,
         );
 
-        function runCommand(
+        async function runCommand(
           command: string,
           subjectContainerId?: string,
         ): Promise<RunCommandResponse> {
-          return desktopCommands.callProviderFunction(configHash, {
-            type: 'ninja',
-            function: {
-              name: 'run_command',
-              args: { command, subjectContainerId },
+          const response = await desktopCommands.callProviderFunction(
+            configHash,
+            {
+              type: 'ninja',
+              function: {
+                name: 'run_command',
+                args: { command, subjectContainerId },
+              },
             },
-          }) as Promise<RunCommandResponse>;
+          );
+
+          // The Rust side returns the subject container ID as a bare
+          // string.
+          if (typeof response !== 'string') {
+            throw new Error(
+              `Unexpected response to command '${command}': ${response}`,
+            );
+          }
+
+          return { subjectContainerId: response };
         }
 
         queue.output({

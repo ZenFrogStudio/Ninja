@@ -50,14 +50,15 @@ pub fn move_bounded_workspaces_to_new_monitor(
   state: &mut WmState,
   config: &UserConfig,
 ) -> anyhow::Result<()> {
+  let monitor_id = monitor.stable_id();
+  let monitor_index = monitor.index();
+
   let bound_workspace_configs = config
     .value
     .workspaces
     .iter()
     .filter(|config| {
-      config.bind_to_monitor.is_some_and(|monitor_index| {
-        monitor.index() == monitor_index as usize
-      })
+      config.matches_monitor(monitor_id.as_deref(), monitor_index)
     })
     .collect::<Vec<_>>();
 

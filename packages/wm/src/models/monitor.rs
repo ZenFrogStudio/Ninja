@@ -66,6 +66,31 @@ impl Monitor {
     self.0.borrow_mut().native_properties = native_properties;
   }
 
+  /// Identifier for the physical panel this monitor represents.
+  ///
+  /// Stable across disconnects, reboots, and rearranging the displays,
+  /// unlike `index()`, which is a position that `sort_monitors` recomputes
+  /// from screen coordinates. Use this whenever a monitor has to be
+  /// remembered beyond the current layout.
+  ///
+  /// Returns `None` when the platform can't identify the panel, in which
+  /// case callers fall back to the monitor index.
+  ///
+  /// # Platform-specific
+  ///
+  /// - **Windows**: The display's device path.
+  /// - **macOS**: The display's UUID.
+  pub fn stable_id(&self) -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+      self.native_properties().device_path
+    }
+    #[cfg(target_os = "macos")]
+    {
+      Some(self.native_properties().device_uuid)
+    }
+  }
+
   pub fn displayed_workspace(&self) -> Option<Workspace> {
     self
       .child_focus_order()

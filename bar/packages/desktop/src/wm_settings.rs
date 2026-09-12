@@ -2,8 +2,8 @@ use std::{fs, path::PathBuf};
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
+use wm::LocalIpcClient;
 use wm_common::ClientResponseData;
-use wm_ipc_client::IpcClient;
 
 /// A single scalar setting within the WM's config file, addressed by its
 /// full path through the document.
@@ -58,7 +58,7 @@ pub struct WmGapsSettings {
 /// Queried rather than assumed, so that a `--config` override is
 /// respected and the UI edits the file actually in use.
 async fn config_path() -> anyhow::Result<PathBuf> {
-  let mut client = IpcClient::connect().await?;
+  let mut client = LocalIpcClient::connect()?;
   let message = "query config-path";
 
   client.send(message).await?;
@@ -297,7 +297,7 @@ pub async fn write_wm_settings(
   })?;
 
   // Apply immediately rather than waiting for a manual reload.
-  let mut client = IpcClient::connect().await?;
+  let mut client = LocalIpcClient::connect()?;
   client.send("command wm-reload-config").await?;
   let _ = client.client_response("command wm-reload-config").await;
 

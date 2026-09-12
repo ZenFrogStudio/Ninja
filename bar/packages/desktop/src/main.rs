@@ -1,5 +1,7 @@
 // Prevent additional console window on Windows in release mode.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// `CLAUDE.md` requires a `SAFETY:` comment on every `unsafe` block.
+#![warn(clippy::undocumented_unsafe_blocks)]
 
 use std::{env, path::Path, sync::Arc};
 #[cfg(target_os = "windows")]
@@ -30,8 +32,8 @@ use crate::{
   monitor_state::MonitorState,
   pack_installer::PackInstaller,
   providers::{ProviderEmission, ProviderManager},
+  settings_window::{open_settings_window, SettingsRoute},
   shell_state::ShellState,
-  sys_tray::{SettingsRoute, SysTray},
   widget_factory::{WidgetFactory, WidgetOpenOptions},
   widget_pack::{MonitorSelection, WidgetPackManager, WidgetPlacement},
 };
@@ -45,8 +47,8 @@ mod config_migration;
 mod monitor_state;
 mod pack_installer;
 mod providers;
+mod settings_window;
 mod shell_state;
-mod sys_tray;
 mod widget_factory;
 mod widget_pack;
 mod wm_settings;
@@ -66,6 +68,9 @@ async fn main() -> anyhow::Result<()> {
     use windows::Win32::System::Console::{
       AttachConsole, ATTACH_PARENT_PROCESS,
     };
+    // SAFETY: Called once before any output is written, and takes no
+    // pointers. It fails harmlessly when there is no parent console or
+    // when one is already attached.
     let _ = unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
   }
 
@@ -100,10 +105,12 @@ async fn main() -> anyhow::Result<()> {
               let start_res = start_app(app, cli).await;
 
               // If unable to start Ninja, the error is fatal and a message
-              // dialog is shown.
+              // dialog is shown. Release builds run without a console, so
+              // without this a user whose bar fails to start would see
+              // nothing at all.
               if let Err(err) = &start_res {
-                // TODO: Show error dialog.
                 error!("{:?}", err);
+                show_fatal_error_dialog(app.handle(), err);
               };
 
               start_res
@@ -125,6 +132,7 @@ async fn main() -> anyhow::Result<()> {
             wm_config_path,
             wm_verbosity,
             app.handle().clone(),
+            app.state::<Arc<WidgetFactory>>().inner().clone(),
           )?;
 
           Ok(())
@@ -148,8 +156,6 @@ async fn main() -> anyhow::Result<()> {
       commands::write_wm_settings,
       commands::unlisten_provider,
       commands::call_provider_function,
-      commands::start_preview_widget,
-      commands::stop_all_preview_widgets,
       commands::set_always_on_top,
       commands::set_skip_taskbar,
       commands::shell_exec,
@@ -203,8 +209,44 @@ fn output_query(app: &tauri::App, args: QueryArgs) -> anyhow::Result<()> {
   }
 }
 
+/// Shows a blocking error dialog for a fatal startup failure.
+///
+/// The dialog plugin is registered as the first statement of `start_app`,
+/// so it is normally available even when startup fails later. But if
+/// registering the plugin is itself what failed, reaching it here would
+/// panic - caught so the caller's error is still what gets returned
+/// instead of being replaced by a panic.
+fn show_fatal_error_dialog(app_handle: &AppHandle, err: &anyhow::Error) {
+  use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+
+  let app_handle = app_handle.clone();
+  let message = format!("{err:#}");
+
+  // `AppHandle` isn't `UnwindSafe`, but the closure only reads it to
+  // display a dialog - nothing here can leave shared state inconsistent
+  // if it unwinds.
+  let dialog_res =
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+      app_handle
+        .dialog()
+        .message(message)
+        .title("Ninja failed to start")
+        .kind(MessageDialogKind::Error)
+        .blocking_show();
+    }));
+
+  if dialog_res.is_err() {
+    error!("Failed to show the startup error dialog.");
+  }
+}
+
 /// Starts Ninja - either with a specific widget or all widgets.
 async fn start_app(app: &mut tauri::App, cli: Cli) -> anyhow::Result<()> {
+  // Registered first, before anything else that can fail, so a fatal
+  // startup error further down always has a dialog plugin available to
+  // report through.
+  app.handle().plugin(tauri_plugin_dialog::init())?;
+
   // Runs before anything reads config, so a machine upgrading from the
   // pre-rename build starts with its existing settings rather than
   // defaults.
@@ -270,7 +312,6 @@ async fn start_app(app: &mut tauri::App, cli: Cli) -> anyhow::Result<()> {
   }
 
   app.manage(ShellState::new(app.handle(), widget_factory.clone()));
-  app.handle().plugin(tauri_plugin_dialog::init())?;
   app.handle().plugin(tauri_plugin_shell::init())?;
 
   // Initialize `ProviderManager` in Tauri state.
@@ -280,22 +321,11 @@ async fn start_app(app: &mut tauri::App, cli: Cli) -> anyhow::Result<()> {
   // Open widgets based on CLI command.
   open_widgets_by_cli_command(cli, widget_factory.clone()).await?;
 
-  // Add application icon to system tray.
-  let tray = SysTray::new(
-    app.handle(),
-    app_settings.clone(),
-    widget_pack_manager.clone(),
-    widget_factory.clone(),
-  )
-  .await?;
-
   listen_events(
     app.handle(),
-    app_settings,
     widget_pack_manager,
     monitor_state,
     widget_factory,
-    tray,
     manager,
     emit_rx,
   );
@@ -308,49 +338,33 @@ async fn start_app(app: &mut tauri::App, cli: Cli) -> anyhow::Result<()> {
 }
 
 /// Listens for events and updates state accordingly.
-#[allow(clippy::too_many_arguments)]
 fn listen_events(
   app_handle: &AppHandle,
-  app_settings: Arc<AppSettings>,
   widget_pack_manager: Arc<WidgetPackManager>,
   monitor_state: Arc<MonitorState>,
   widget_factory: Arc<WidgetFactory>,
-  tray: SysTray,
   manager: Arc<ProviderManager>,
   mut emit_rx: mpsc::UnboundedReceiver<ProviderEmission>,
 ) {
   let app_handle = app_handle.clone();
   let mut widget_open_rx = widget_factory.open_tx.subscribe();
   let mut widget_close_rx = widget_factory.close_tx.subscribe();
-  let mut settings_change_rx = app_settings.settings_change_tx.subscribe();
   let mut monitors_change_rx = monitor_state.change_tx.subscribe();
   let mut widget_configs_change_rx =
     widget_pack_manager.widget_configs_change_tx.subscribe();
-  let mut widget_packs_change_rx =
-    widget_pack_manager.widget_packs_change_tx.subscribe();
 
   task::spawn(async move {
     loop {
       let res = tokio::select! {
         Ok(widget_state) = widget_open_rx.recv() => {
           info!("Widget opened.");
-          let _ = tray.refresh().await;
           let _ = app_handle.emit("widget-opened", widget_state);
           Ok(())
         },
         Ok(widget_id) = widget_close_rx.recv() => {
           info!("Widget closed.");
-          let _ = tray.refresh().await;
           let _ = app_handle.emit("widget-closed", widget_id);
           Ok(())
-        },
-        Ok(_) = settings_change_rx.recv() => {
-          info!("Settings changed.");
-          tray.refresh().await
-        },
-        Ok(_) = widget_packs_change_rx.recv() => {
-          info!("Widget packs changed.");
-          tray.refresh().await
         },
         Ok(monitors) = monitors_change_rx.recv() => {
           info!("Monitors changed: {} monitor(s).", monitors.len());
@@ -407,7 +421,7 @@ fn setup_single_instance(
             CliCommand::Empty => Ok(()),
             // Driven by the window manager's tray, so that both halves of
             // the product are controlled from a single menu.
-            CliCommand::Settings(args) => SysTray::open_settings_window(
+            CliCommand::Settings(args) => open_settings_window(
               &app_handle,
               match args.page.as_deref() {
                 Some("wm") => SettingsRoute::WindowManager,
@@ -493,6 +507,10 @@ async fn open_widgets_by_cli_command(
 /// error — the whole app follows it out, so that the two halves can't be
 /// left half-running.
 ///
+/// Also spawns a task that answers the WM tray's "Settings", "Widgets" and
+/// "Reload bar" requests directly, so those menu items don't have to spawn
+/// a second copy of this executable to reach the bar.
+///
 /// # Platform-specific
 ///
 /// - **Windows**: Hosts the window manager in this process.
@@ -502,6 +520,7 @@ fn start_window_manager(
   config_path: Option<PathBuf>,
   verbosity: Verbosity,
   app_handle: AppHandle,
+  widget_factory: Arc<WidgetFactory>,
 ) -> anyhow::Result<()> {
   // The event loop is built on its own thread rather than handed to it.
   // Its message window belongs to whichever thread creates it, and
@@ -537,6 +556,36 @@ fn start_window_manager(
       anyhow::anyhow!("Failed to start the WM event loop: {err}")
     })?;
 
+  // Carries the tray's "Settings", "Widgets" and "Reload bar" requests to
+  // the bar sharing this process, in place of spawning a second copy of
+  // the executable to reach it.
+  let (bar_request_tx, mut bar_request_rx) =
+    mpsc::unbounded_channel::<wm::BarRequest>();
+
+  task::spawn({
+    let app_handle = app_handle.clone();
+
+    async move {
+      while let Some(request) = bar_request_rx.recv().await {
+        let res = match request {
+          wm::BarRequest::OpenSettings => {
+            open_settings_window(&app_handle, SettingsRoute::Index)
+          }
+          wm::BarRequest::OpenWmSettings => {
+            open_settings_window(&app_handle, SettingsRoute::WindowManager)
+          }
+          wm::BarRequest::ReloadWidgets => {
+            widget_factory.relaunch_all().await
+          }
+        };
+
+        if let Err(err) = res {
+          error!("Failed to handle bar request: {:?}", err);
+        }
+      }
+    }
+  });
+
   // The WM gets a thread of its own too, rather than a task. Its
   // container tree is built on `Rc<RefCell<..>>`, so the future isn't
   // `Send` and can't live on the multi-threaded runtime — `block_on`
@@ -549,8 +598,13 @@ fn start_window_manager(
     let _event_loop_guard = wm::EventLoopGuard(dispatcher.clone());
 
     runtime.block_on(async {
-      if let Err(err) =
-        wm::start_wm(config_path, verbosity, &dispatcher).await
+      if let Err(err) = wm::start_wm(
+        config_path,
+        verbosity,
+        &dispatcher,
+        Some(bar_request_tx),
+      )
+      .await
       {
         error!("Window manager exited with an error: {:?}", err);
         dispatcher.show_error_dialog("Fatal error", &err.to_string());

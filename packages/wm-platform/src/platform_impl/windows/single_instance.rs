@@ -32,16 +32,22 @@ impl SingleInstance {
   /// Implements [`SingleInstance::new`].
   pub(crate) fn new() -> crate::Result<Self> {
     // Create a named mutex scoped to the current login session.
+    // SAFETY: `APP_GUID` is a static, null-terminated wide string, and
+    // passing no security attributes asks for the default descriptor.
     let handle = unsafe { CreateMutexW(None, true, APP_GUID) }?;
 
     // Read the last error immediately, before anything else can overwrite
     // it. `CreateMutexW` succeeds either way, and reports a pre-existing
     // mutex through `ERROR_ALREADY_EXISTS`.
+    // SAFETY: `GetLastError` reads this thread's last-error value and
+    // touches no caller memory.
     let already_exists = unsafe { GetLastError() } == ERROR_ALREADY_EXISTS;
 
     if already_exists {
       // Close our handle so that we don't hold a reference to a mutex
       // owned by the other instance.
+      // SAFETY: `handle` was just returned by `CreateMutexW`, is owned by
+      // this function, and is not used again after this point.
       unsafe {
         let _ = CloseHandle(handle);
       }
@@ -60,6 +66,8 @@ impl SingleInstance {
   pub(crate) fn is_running() -> bool {
     // No access rights are requested, since only the mutex's existence
     // matters here.
+    // SAFETY: `APP_GUID` is a static, null-terminated wide string, and
+    // nothing else is passed by reference.
     let res = unsafe {
       OpenMutexW(SYNCHRONIZATION_ACCESS_RIGHTS::default(), false, APP_GUID)
     };
@@ -68,6 +76,8 @@ impl SingleInstance {
       // The mutex exists, so another instance is running. Close the handle
       // we just opened, since we only needed its existence.
       Ok(handle) => {
+        // SAFETY: `handle` was just returned by `OpenMutexW`, is owned by
+        // this function, and is not used again after this point.
         unsafe {
           let _ = CloseHandle(handle);
         }
@@ -83,6 +93,9 @@ impl SingleInstance {
 
 impl Drop for SingleInstance {
   fn drop(&mut self) {
+    // SAFETY: `handle` is owned by this `SingleInstance`, was acquired in
+    // `new` and is released and closed only here, once, as the value is
+    // being destroyed.
     unsafe {
       let _ = ReleaseMutex(self.handle);
       let _ = CloseHandle(self.handle);

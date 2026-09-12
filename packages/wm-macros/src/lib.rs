@@ -1,6 +1,8 @@
 // Enable proc macro diagnostics to allow emitting warnings and errors in
 // line
 #![feature(proc_macro_diagnostic)]
+// `CLAUDE.md` requires a `SAFETY:` comment on every `unsafe` block.
+#![warn(clippy::undocumented_unsafe_blocks)]
 
 mod common;
 mod enum_from_inner;
@@ -21,7 +23,7 @@ mod prelude {
 ///   `SubEnumTwo` share variant(s).
 ///
 /// Accepts a defaults block of attributes to be added to every subenum
-/// ```
+/// ```text
 /// #[subenum(defaults, {
 ///   /// Subenum of [X]
 ///   #[derive(Clone, Debug)]
@@ -29,7 +31,7 @@ mod prelude {
 /// ```
 ///
 /// And any number of subenum declarations, which are defined as
-/// ```
+/// ```text
 /// #[subenum(SubenumName, {
 ///   /// Subset of [X] that can be checked for equality.
 ///   #[derive(PartialEq)] // Will also derive [Clone] and [Debug] from the defaults block

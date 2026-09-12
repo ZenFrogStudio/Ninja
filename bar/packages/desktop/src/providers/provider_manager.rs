@@ -7,7 +7,7 @@ use tokio::{
   sync::{mpsc, oneshot, Mutex},
   task,
 };
-use tracing::info;
+use tracing::{info, warn};
 
 #[cfg(any(target_os = "macos", windows))]
 use super::komorebi::KomorebiProvider;
@@ -377,7 +377,12 @@ impl ProviderManager {
       }
     }
 
-    rx.await?.map_err(anyhow::Error::msg)
+    // Logged here as well as returned: a widget's click handler rarely
+    // surfaces a rejected call, so without this a command the WM refuses
+    // leaves no trace anywhere.
+    rx.await?
+      .inspect_err(|err| warn!("Provider function failed: {err}"))
+      .map_err(anyhow::Error::msg)
   }
 
   /// Destroys and cleans up the provider with the given config.

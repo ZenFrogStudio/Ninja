@@ -6,7 +6,7 @@ use std::io::IsTerminal;
 use std::{env, path::PathBuf, process, time::Duration};
 
 use anyhow::{Context, Error};
-use tokio::{process::Command, signal};
+use tokio::{process::Command, signal, sync::mpsc};
 use tracing::Level;
 use tracing_subscriber::{
   fmt::{self, writer::MakeWriterExt},
@@ -45,6 +45,17 @@ mod test_utils;
 /// callers hosted alongside it.
 pub use ipc_server::LocalIpcClient;
 
+/// Something the WM's tray asks of the bar hosted alongside it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BarRequest {
+  /// Open the bar's settings window on its index page.
+  OpenSettings,
+  /// Open the bar's settings window on the window manager page.
+  OpenWmSettings,
+  /// Close and reopen every widget.
+  ReloadWidgets,
+}
+
 /// Runs the WM as a standalone process.
 ///
 /// Conditionally starts the WM or runs a CLI command based on the given
@@ -77,7 +88,7 @@ pub fn run() -> anyhow::Result<()> {
 
       rt.block_on(async {
         let start_res =
-          start_wm(config_path, verbosity, &dispatcher).await;
+          start_wm(config_path, verbosity, &dispatcher, None).await;
 
         if let Err(err) = &start_res {
           // If unable to start the WM, the error is fatal and a message
@@ -132,6 +143,11 @@ impl Drop for EventLoopGuard {
 /// already running on a thread of its own, and blocks the calling task for
 /// the lifetime of the WM.
 ///
+/// `bar_request_tx` is `Some` when a bar shares this process, so the
+/// tray's "Settings", "Widgets" and "Reload bar" items can ask it directly
+/// rather than spawning a second copy of the executable. Pass `None` when
+/// running standalone.
+///
 /// # Errors
 ///
 /// Returns an error if startup fails — another instance is already
@@ -142,6 +158,7 @@ pub async fn start_wm(
   config_path: Option<PathBuf>,
   verbosity: Verbosity,
   dispatcher: &Dispatcher,
+  bar_request_tx: Option<mpsc::UnboundedSender<BarRequest>>,
 ) -> anyhow::Result<()> {
   // Non-fatal: a host that already runs its own logging has installed a
   // subscriber for the whole process, and only one can be set. The WM's
@@ -170,7 +187,8 @@ pub async fn start_wm(
   let mut config = UserConfig::new(config_path)?;
 
   // Add application icon to system tray.
-  let mut tray = SystemTray::new(&config.path, dispatcher.clone())?;
+  let mut tray =
+    SystemTray::new(&config.path, dispatcher.clone(), bar_request_tx)?;
 
   let mut wm = WindowManager::new(&mut config, dispatcher.clone())?;
 

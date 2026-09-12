@@ -41,7 +41,9 @@ pub enum ProviderOutput {
   Media(MediaOutput),
   Memory(MemoryOutput),
   Disk(DiskOutput),
-  Network(NetworkOutput),
+  // Boxed because `NetworkOutput` is far larger than the other variants,
+  // which would otherwise bloat every `ProviderOutput` instance.
+  Network(Box<NetworkOutput>),
   #[cfg(windows)]
   Systray(SystrayOutput),
   #[cfg(windows)]
@@ -54,8 +56,13 @@ impl_provider_output! {
   Host(HostOutput),
   Ninja(NinjaOutput),
   Memory(MemoryOutput),
-  Disk(DiskOutput),
-  Network(NetworkOutput)
+  Disk(DiskOutput)
+}
+
+impl From<NetworkOutput> for ProviderOutput {
+  fn from(value: NetworkOutput) -> Self {
+    Self::Network(Box::new(value))
+  }
 }
 
 #[cfg(target_os = "macos")]

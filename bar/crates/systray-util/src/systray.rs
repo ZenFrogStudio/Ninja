@@ -434,6 +434,9 @@ impl Systray {
     // Checks whether the window associated with the given handle still
     // exists. If the window is invalid, removes the corresponding icon
     // from the collection.
+    //
+    // SAFETY: `IsWindow` is defined for any handle value, including
+    // stale ones, which is exactly what is being tested here.
     if !unsafe { IsWindow(HWND(window_handle as _)) }.as_bool() {
       return Err(crate::Error::InoperableIcon);
     }
@@ -451,6 +454,10 @@ impl Systray {
     // dismissed after clicking outside.
     if is_mouse_click {
       let mut proc_id = u32::default();
+
+      // SAFETY: `window_handle` was confirmed live by the `IsWindow`
+      // check above, and `proc_id` is an owned `u32` that outlives the
+      // call.
       unsafe {
         GetWindowThreadProcessId(
           HWND(window_handle as _),
@@ -458,6 +465,9 @@ impl Systray {
         )
       };
 
+      // SAFETY: `proc_id` was filled in above. This only grants the
+      // owning process the right to take foreground; it takes no
+      // pointers and fails harmlessly if the process has since exited.
       let _ = unsafe { AllowSetForegroundWindow(proc_id) };
     }
 
@@ -538,6 +548,10 @@ impl Systray {
       Util::pack_i32(message as i16, 0)
     };
 
+    // SAFETY: `send_action` checked `window_handle` with `IsWindow`
+    // before reaching here, and both parameters are packed integers
+    // rather than pointers, so nothing can dangle across the process
+    // boundary.
     unsafe {
       SendNotifyMessageW(
         HWND(window_handle as _),

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use sysinfo::System;
 
 use crate::{
   common::SyncInterval,
@@ -38,16 +39,20 @@ impl CpuProvider {
 
   fn run_interval(&self) -> anyhow::Result<CpuOutput> {
     let mut sysinfo = self.common.sysinfo.blocking_lock();
-    sysinfo.refresh_cpu();
+    sysinfo.refresh_cpu_all();
+
+    // All cores share the same physical package, so the first core's
+    // frequency and vendor stand in for the "global" value that older
+    // `sysinfo` versions exposed via `global_cpu_info`.
+    let first_cpu = sysinfo.cpus().first();
 
     Ok(CpuOutput {
-      usage: sysinfo.global_cpu_info().cpu_usage(),
-      frequency: sysinfo.global_cpu_info().frequency(),
+      usage: sysinfo.global_cpu_usage(),
+      frequency: first_cpu.map(|cpu| cpu.frequency()).unwrap_or(0),
       logical_core_count: sysinfo.cpus().len(),
-      physical_core_count: sysinfo
-        .physical_core_count()
+      physical_core_count: System::physical_core_count()
         .unwrap_or(sysinfo.cpus().len()),
-      vendor: sysinfo.global_cpu_info().vendor_id().into(),
+      vendor: first_cpu.map(|cpu| cpu.vendor_id()).unwrap_or("").into(),
     })
   }
 }

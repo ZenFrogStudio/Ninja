@@ -147,7 +147,9 @@ img.logo {
     background: transparent;
     color: rgb(255 255 255 / 35%);
     padding: 4px 7px;
-    transition: color 200ms ease-in-out, background 200ms ease-in-out;
+    transition:
+      color 200ms ease-in-out,
+      background 200ms ease-in-out;
 
     &:hover {
       background: rgb(255 255 255 / 10%);

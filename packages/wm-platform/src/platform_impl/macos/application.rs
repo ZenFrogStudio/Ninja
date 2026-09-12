@@ -35,6 +35,10 @@ impl Application {
       // Creation of `AXUIElement` for an application does not fail even
       // if the PID is invalid. Instead, subsequent operations on
       // the returned `AXUIElement` will error.
+      //
+      // SAFETY: `new_application` accepts any PID and follows the
+      // `Create` rule, so the returned element is owned here and
+      // released when the last `CFRetained` clone drops.
       unsafe { AXUIElement::new_application(pid) },
       dispatcher.clone(),
     ));
@@ -84,6 +88,8 @@ impl Application {
   pub fn psn(&self) -> crate::Result<ffi::ProcessSerialNumber> {
     let mut psn = ffi::ProcessSerialNumber::default();
 
+    // SAFETY: The out-parameter points to the `psn` local, which outlives
+    // the call and has the layout Carbon expects.
     if unsafe { ffi::GetProcessForPID(self.pid, &raw mut psn) } != 0 {
       return Err(crate::Error::Platform(
         "Failed to get process serial number.".to_string(),
@@ -123,6 +129,9 @@ impl Application {
       info
     };
 
+    // SAFETY: Both pointers point to locals that outlive the call, and
+    // `info_length` tells Carbon how large the `ProcessInfo` buffer is,
+    // so it cannot write out of bounds.
     if unsafe {
       ffi::GetProcessInformation(&raw const psn, &raw mut process_info)
     } != 0

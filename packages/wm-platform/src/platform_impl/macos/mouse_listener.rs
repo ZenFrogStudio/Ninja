@@ -76,6 +76,10 @@ impl MouseListener {
       .flatten()
       .inspect_err(|_| {
         // Clean up the callback data if event tap creation fails.
+        //
+        // SAFETY: `callback_data_ptr` came from the `Box::into_raw`
+        // above and no event tap was created, so nothing else can
+        // reference it.
         let _ =
           unsafe { Box::from_raw(callback_data_ptr as *mut CallbackData) };
       })?;
@@ -121,6 +125,10 @@ impl MouseListener {
       .flatten()
       .inspect_err(|_| {
         // Clean up the callback data if event tap creation fails.
+        //
+        // SAFETY: `callback_data_ptr` came from the `Box::into_raw`
+        // above and no event tap was created, so nothing else can
+        // reference it.
         let _ =
           unsafe { Box::from_raw(callback_data_ptr as *mut CallbackData) };
       })?;
@@ -142,6 +150,10 @@ impl MouseListener {
 
     // Clean up the callback data if it exists.
     if let Some(ptr) = self.callback_data_ptr.take() {
+      // SAFETY: `ptr` came from `Box::into_raw` in `new` or
+      // `set_enabled_events`, and `take` ensures it is only reclaimed
+      // once. The tap that shared it was invalidated above, so the
+      // callback can no longer run.
       let _ = unsafe { Box::from_raw(ptr as *mut CallbackData) };
     }
 
@@ -156,6 +168,10 @@ impl MouseListener {
   ) -> crate::Result<ThreadBound<CFRetained<CFMachPort>>> {
     let mask = Self::event_mask_from_enabled(enabled_events);
 
+    // SAFETY: `mouse_event_callback` has the signature that
+    // `CGEventTapCallBack` expects, and `callback_data_ptr` points to a
+    // `CallbackData` that is leaked until `terminate` frees it, which
+    // only happens after the tap has been invalidated.
     let tap_port = unsafe {
       CGEvent::tap_create(
         CGEventTapLocation::AnnotatedSessionEventTap,
@@ -182,6 +198,9 @@ impl MouseListener {
       Error::Platform("Failed to get current run loop".to_string())
     })?;
 
+    // SAFETY: `kCFRunLoopCommonModes` is a Core Foundation extern static
+    // that is never mutated and stays alive for the lifetime of the
+    // process.
     current_loop
       .add_source(Some(&loop_source), unsafe { kCFRunLoopCommonModes });
 
@@ -233,9 +252,17 @@ impl MouseListener {
   ) -> *mut CGEvent {
     if user_info.is_null() {
       tracing::error!("Null pointer passed to mouse event callback.");
+      // SAFETY: `cg_event` is the `CGEvent` handed to this callback by
+      // the event tap. It is valid for the duration of the callback and
+      // is returned unmodified.
       return unsafe { cg_event.as_mut() };
     }
 
+    // SAFETY: `user_info` is the `CallbackData` pointer given to
+    // `tap_create` and checked non-null above. It is only freed by
+    // `terminate`, which invalidates the tap first, so the data outlives
+    // every callback invocation. Callbacks are serialised on the tap's
+    // run loop thread, so the exclusive borrow is unaliased.
     let data = unsafe { &mut *user_info.cast::<CallbackData>() };
 
     // Map a `CGEventType` to a `MouseEventKind`.
@@ -248,6 +275,9 @@ impl MouseListener {
     };
 
     // Extract the cursor position from the `CGEvent`.
+    //
+    // SAFETY: `cg_event` is valid for the duration of the callback, and
+    // the shared borrow ends before it is returned below.
     let cg_event_ref = unsafe { cg_event.as_ref() };
     let position = {
       let cg_point = CGEvent::location(Some(cg_event_ref));
@@ -332,6 +362,8 @@ impl MouseListener {
       }
     }
 
+    // SAFETY: `cg_event` is valid for the duration of the callback and is
+    // returned unmodified, passing it back to the event tap.
     unsafe { cg_event.as_mut() }
   }
 }

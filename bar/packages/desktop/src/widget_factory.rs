@@ -774,31 +774,9 @@ impl WidgetFactory {
     Ok(())
   }
 
-  /// Stops any currently running preview widget(s).
-  pub async fn stop_all_previews(&self) -> anyhow::Result<()> {
-    tracing::info!("Stopping all preview widgets.");
-
-    // Find widget states marked as previews.
-    let preview_widget_ids = {
-      let widget_states = self.widget_states.lock().await;
-      widget_states
-        .iter()
-        .filter(|(_, state)| state.is_preview)
-        .map(|(id, _)| id.clone())
-        .collect::<Vec<_>>()
-    };
-
-    // Stop each preview widget.
-    for widget_id in preview_widget_ids {
-      self.stop_by_id(&widget_id)?;
-    }
-
-    Ok(())
-  }
-
   /// Relaunches all currently open widgets.
   pub async fn relaunch_all(&self) -> anyhow::Result<()> {
-    let widget_ids =
+    let widget_ids: Vec<String> =
       { self.widget_states.lock().await.keys().cloned().collect() };
 
     self.relaunch_by_ids(&widget_ids).await
@@ -807,7 +785,7 @@ impl WidgetFactory {
   /// Relaunches widgets with the given widget ID's.
   pub async fn relaunch_by_ids(
     &self,
-    widget_ids: &Vec<String>,
+    widget_ids: &[String],
   ) -> anyhow::Result<()> {
     let changed_states = {
       let mut widget_states = self.widget_states.lock().await;
@@ -869,21 +847,6 @@ impl WidgetFactory {
     };
 
     self.relaunch_by_ids(&widget_ids).await
-  }
-
-  /// Clears the cache for all open widgets.
-  pub fn clear_cache(&self) {
-    for (_, window) in self.app_handle.webview_windows() {
-      // Post a message to the service worker for clearing the cache.
-      _ = window.eval(
-        r"
-        if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.ready.then(sw => {
-            sw.active?.postMessage({ type: 'CLEAR_CACHE' });
-          });
-        }",
-      );
-    }
   }
 
   /// Returns widget states by their widget ID's.

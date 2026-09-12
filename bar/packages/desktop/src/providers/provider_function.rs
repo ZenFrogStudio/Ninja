@@ -64,6 +64,9 @@ pub struct MediaControlArgs {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "name", content = "args", rename_all = "snake_case")]
+// The `Icon` prefix is part of the widget-facing `name` field (e.g.
+// `icon_hover_enter`); dropping it would break existing widget packs.
+#[allow(clippy::enum_variant_names)]
 pub enum SystrayFunction {
   IconHoverEnter(SystrayIconArgs),
   IconHoverLeave(SystrayIconArgs),

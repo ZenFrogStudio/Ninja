@@ -26,7 +26,16 @@ export const desktopCommands = {
 export type ProviderFunction =
   | AudioFunction
   | MediaFunction
+  | NinjaFunction
   | SystrayFunction;
+
+/**
+ * Response from `call_provider_function`.
+ *
+ * Mirrors the untagged Rust enum `ProviderFunctionResponse`: `null` for
+ * most functions, or the subject container ID for a `run_command` call.
+ */
+export type ProviderFunctionResponse = string | null;
 
 export interface AudioFunction {
   type: 'audio';
@@ -57,6 +66,17 @@ export interface MediaFunction {
   };
 }
 
+export interface NinjaFunction {
+  type: 'ninja';
+  function: {
+    name: 'run_command';
+    args: {
+      command: string;
+      subjectContainerId?: string;
+    };
+  };
+}
+
 export interface SystrayFunction {
   type: 'systray';
   function: {
@@ -65,6 +85,7 @@ export interface SystrayFunction {
       | 'icon_hover_leave'
       | 'icon_hover_move'
       | 'icon_left_click'
+      | 'icon_left_double_click'
       | 'icon_right_click'
       | 'icon_middle_click';
     args: {
@@ -115,8 +136,8 @@ function unlistenProvider(configHash: string): Promise<void> {
 function callProviderFunction(
   configHash: string,
   fn: ProviderFunction,
-): Promise<void> {
-  return invoke<void>('call_provider_function', {
+): Promise<ProviderFunctionResponse> {
+  return invoke<ProviderFunctionResponse>('call_provider_function', {
     configHash,
     function: fn,
   });
@@ -198,11 +219,21 @@ export type ShellOutputEncoding =
   | 'iso-2022-jp'
   | 'shift-jis';
 
+/**
+ * How a process ended. Mirrors the Rust `ExitStatus` struct.
+ */
+export interface ShellExitStatus {
+  /** Exit code of the process. */
+  code: number | null;
+  /** Whether the process exited with a zero exit code. */
+  success: boolean;
+  /** Termination signal if the process was killed. */
+  signal: number | null;
+}
+
 export interface ShellExecOutput<
   TOutput extends string | Uint8Array = string,
-> {
-  code: number | null;
-  signal: number | null;
+> extends ShellExitStatus {
   stdout: TOutput;
   stderr: TOutput;
 }
@@ -211,13 +242,12 @@ export interface ShellExecOutput<
  * Invoke a Tauri command with logging and error handling.
  */
 async function invoke<T>(command: string, args?: InvokeArgs): Promise<T> {
-  logger.info(`Calling '${command}' with args:`, args ?? {});
+  // Only the command name is logged. Arguments and responses can carry
+  // shell environment variables, stdin buffers and process output.
+  logger.info(`Calling '${command}'.`);
 
   try {
-    const response = await tauriInvoke<T>(command, args);
-    logger.info(`Response for calling '${command}':`, response);
-
-    return response;
+    return await tauriInvoke<T>(command, args);
   } catch (err) {
     logger.error(`Command '${command}' failed: ${err}`);
     throw new Error(`Command '${command}' failed: ${err}`);

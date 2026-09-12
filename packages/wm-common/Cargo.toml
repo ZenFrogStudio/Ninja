@@ -16,3 +16,6 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 
 wm-platform = { path = "../wm-platform" }
+
+[lints]
+workspace = true

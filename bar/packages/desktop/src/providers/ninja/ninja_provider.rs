@@ -1,12 +1,15 @@
-use std::time::Duration;
+use std::{iter, time::Duration};
 
 use async_trait::async_trait;
+use clap::Parser;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::{sync::mpsc, task};
 use tracing::{debug, info, warn};
 use wm::LocalIpcClient;
-use wm_common::{ClientResponseData, ServerMessage};
+use wm_common::{
+  AppCommand, ClientResponseData, InvokeCommand, ServerMessage,
+};
 
 use crate::providers::{
   CommonProviderState, NinjaFunction, Provider, ProviderFunction,
@@ -330,6 +333,8 @@ impl NinjaProvider {
     command: &str,
     subject_container_id: Option<&str>,
   ) -> anyhow::Result<ProviderFunctionResponse> {
+    ensure_widget_may_run(command)?;
+
     // `--id` is an option on the parent `command`, so it has to precede
     // the subcommand rather than follow it.
     let message = match subject_container_id {
@@ -346,6 +351,32 @@ impl NinjaProvider {
       _ => anyhow::bail!("Unexpected response to '{message}'."),
     }
   }
+}
+
+/// Refuses WM commands that a widget must not run through `runCommand`.
+///
+/// `shell-exec` is refused: it would let any widget run any program and
+/// skip the bar's per-widget shell privileges. Widgets have `shellExec`
+/// with a `shellCommands` privilege for that.
+fn ensure_widget_may_run(command: &str) -> anyhow::Result<()> {
+  let parsed = AppCommand::try_parse_from(
+    iter::once("")
+      .chain(iter::once("command"))
+      .chain(command.split_whitespace()),
+  );
+
+  if let Ok(AppCommand::Command {
+    command: InvokeCommand::ShellExec { .. },
+    ..
+  }) = parsed
+  {
+    anyhow::bail!(
+      "'shell-exec' can't be run via runCommand. Use `shellExec` with a \
+       `shellCommands` privilege instead."
+    );
+  }
+
+  Ok(())
 }
 
 #[async_trait]
@@ -376,5 +407,32 @@ impl Provider for NinjaProvider {
       // loop. A real WM restart takes far longer than this pause.
       tokio::time::sleep(RECONNECT_DELAY_MIN).await;
     }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::ensure_widget_may_run;
+
+  #[test]
+  fn refuses_shell_exec() {
+    assert!(ensure_widget_may_run("shell-exec calc").is_err());
+  }
+
+  #[test]
+  fn refuses_shell_exec_with_flags() {
+    assert!(ensure_widget_may_run("shell-exec --hide-window cmd /C dir")
+      .is_err());
+  }
+
+  #[test]
+  fn allows_other_commands() {
+    assert!(ensure_widget_may_run("focus --workspace 1").is_ok());
+    assert!(ensure_widget_may_run("toggle-floating").is_ok());
+  }
+
+  #[test]
+  fn passes_unparseable_through() {
+    assert!(ensure_widget_may_run("not-a-command").is_ok());
   }
 }

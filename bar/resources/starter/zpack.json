@@ -3,12 +3,8 @@
   "name": "starter",
   "version": "0.0.0",
   "description": "A basic widget pack for testing and development.",
-  "tags": [
-    "topbar"
-  ],
-  "previewImages": [
-    "./resources/preview-image-1.png"
-  ],
+  "tags": ["topbar"],
+  "previewImages": ["./resources/preview-image-1.png"],
   "repositoryUrl": "",
   "widgets": [
     {
@@ -19,11 +15,7 @@
       "focused": false,
       "resizable": false,
       "transparent": true,
-      "includeFiles": [
-        "*.html",
-        "*.css",
-        "*.png"
-      ],
+      "includeFiles": ["*.html", "*.css", "*.png"],
       "caching": {
         "defaultDuration": 604800,
         "rules": []
@@ -58,11 +50,7 @@
       "focused": false,
       "resizable": true,
       "transparent": true,
-      "includeFiles": [
-        "*.html",
-        "*.css",
-        "*.png"
-      ],
+      "includeFiles": ["*.html", "*.css", "*.png"],
       "caching": {
         "defaultDuration": 604800,
         "rules": []
@@ -97,11 +85,7 @@
       "focused": false,
       "resizable": true,
       "transparent": true,
-      "includeFiles": [
-        "*.html",
-        "*.css",
-        "*.png"
-      ],
+      "includeFiles": ["*.html", "*.css", "*.png"],
       "caching": {
         "defaultDuration": 604800,
         "rules": []

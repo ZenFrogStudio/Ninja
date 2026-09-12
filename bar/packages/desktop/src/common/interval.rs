@@ -54,34 +54,6 @@ impl SyncInterval {
   }
 }
 
-/// An interval timer for asynchronous contexts using tokio.
-pub struct AsyncInterval {
-  interval: tokio::time::Interval,
-}
-
-impl AsyncInterval {
-  /// Creates a new `AsyncInterval`.
-  ///
-  /// The interval is clamped to `MIN_REFRESH_INTERVAL_MS`.
-  pub fn new(interval_ms: u64) -> Self {
-    let mut interval = tokio::time::interval(Duration::from_millis(
-      interval_ms.max(MIN_REFRESH_INTERVAL_MS),
-    ));
-
-    // Skip missed ticks when the interval runs. This prevents a burst
-    // of backlogged ticks after a delay.
-    interval
-      .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-    Self { interval }
-  }
-
-  /// Returns a future that will complete at the next tick time.
-  pub async fn tick(&mut self) {
-    self.interval.tick().await;
-  }
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -102,18 +74,6 @@ mod tests {
 
     assert_eq!(
       interval.interval,
-      Duration::from_millis(MIN_REFRESH_INTERVAL_MS)
-    );
-  }
-
-  /// A zero interval must not panic inside `tokio::time::interval`.
-  #[tokio::test]
-  async fn async_interval_clamps_zero() {
-    let mut interval = AsyncInterval::new(0);
-    interval.tick().await;
-
-    assert_eq!(
-      interval.interval.period(),
       Duration::from_millis(MIN_REFRESH_INTERVAL_MS)
     );
   }

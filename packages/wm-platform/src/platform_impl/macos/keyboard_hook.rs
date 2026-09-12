@@ -98,6 +98,9 @@ impl KeyboardHook {
       .flatten()
       .inspect_err(|_| {
         // Clean up the callback data if event tap creation fails.
+        //
+        // SAFETY: `callback_ptr` came from the `Box::into_raw` above and
+        // no event tap was created, so nothing else can reference it.
         let _ =
           unsafe { Box::from_raw(callback_ptr as *mut CallbackData) };
       })?;
@@ -120,6 +123,9 @@ impl KeyboardHook {
 
     // Clean up the callback data if it exists.
     if let Some(ptr) = self.callback_ptr.take() {
+      // SAFETY: `ptr` came from `Box::into_raw` in `new`, and `take`
+      // ensures it is only reclaimed once. The event tap that shared it
+      // was invalidated above, so the callback can no longer run.
       let _ = unsafe { Box::from_raw(ptr as *mut CallbackData) };
     }
 
@@ -134,6 +140,10 @@ impl KeyboardHook {
     let mask: CGEventMask = (1u64 << u64::from(CGEventType::KeyDown.0))
       | (1u64 << u64::from(CGEventType::KeyUp.0));
 
+    // SAFETY: `keyboard_event_callback` has the signature that
+    // `CGEventTapCallBack` expects, and `callback_ptr` points to a
+    // `CallbackData` that is leaked until `terminate` frees it, which
+    // only happens after the tap has been invalidated.
     let tap_port = unsafe {
       CGEvent::tap_create(
         CGEventTapLocation::SessionEventTap,
@@ -161,6 +171,9 @@ impl KeyboardHook {
       Error::Platform("Failed to get current run loop".to_string())
     })?;
 
+    // SAFETY: `kCFRunLoopCommonModes` is a Core Foundation extern static
+    // that is never mutated and stays alive for the lifetime of the
+    // process.
     current_loop
       .add_source(Some(&loop_source), unsafe { kCFRunLoopCommonModes });
 
@@ -180,10 +193,16 @@ impl KeyboardHook {
   ) -> *mut CGEvent {
     if user_info.is_null() {
       tracing::error!("Null pointer passed to keyboard event callback.");
+      // SAFETY: `event` is the `CGEvent` handed to this callback by the
+      // event tap. It is valid for the duration of the callback and is
+      // returned unmodified.
       return unsafe { event.as_mut() };
     }
 
     // Extract the key code of the pressed/released key.
+    //
+    // SAFETY: `event` is valid for the duration of the callback, and
+    // reading a field does not mutate it.
     let key_code = KeyCode(unsafe {
       CGEvent::integer_value_field(
         Some(event.as_ref()),
@@ -193,9 +212,13 @@ impl KeyboardHook {
 
     // Try to convert the key code to a known key.
     let Ok(key) = Key::try_from(key_code) else {
+      // SAFETY: `event` is valid for the duration of the callback and is
+      // returned unmodified.
       return unsafe { event.as_mut() };
     };
 
+    // SAFETY: `event` is valid for the duration of the callback, and
+    // reading its flags does not mutate it.
     let event_flags = unsafe { CGEvent::flags(Some(event.as_ref())) };
     let key_event = KeyEvent {
       key,
@@ -205,12 +228,19 @@ impl KeyboardHook {
     };
 
     // Get callback from user data and invoke it.
+    //
+    // SAFETY: `user_info` is the `CallbackData` pointer given to
+    // `tap_create` and checked non-null above. It is only freed by
+    // `terminate`, which invalidates the tap first, so the data outlives
+    // every callback invocation.
     let data = unsafe { &*(user_info as *const CallbackData) };
     let should_intercept = (data.callback)(key_event);
 
     if should_intercept {
       std::ptr::null_mut()
     } else {
+      // SAFETY: `event` is valid for the duration of the callback and is
+      // returned unmodified, passing it back to the event tap.
       unsafe { event.as_mut() }
     }
   }

@@ -1,3 +1,4 @@
+mod auto_launch;
 pub(crate) mod com;
 mod display;
 mod display_listener;
@@ -10,6 +11,7 @@ mod single_instance;
 mod system_theme;
 mod window_listener;
 
+pub(crate) use auto_launch::*;
 pub(crate) use display::*;
 pub(crate) use display_listener::*;
 pub(crate) use event_loop::*;

@@ -61,10 +61,11 @@ impl DiskProvider {
   }
 
   fn run_interval(&mut self) -> anyhow::Result<DiskOutput> {
-    self.disks.refresh();
+    self.disks.refresh(false);
 
     let disks = self
       .disks
+      .list()
       .iter()
       .map(|disk| -> anyhow::Result<Disk> {
         let name = disk.name().to_string_lossy().to_string();

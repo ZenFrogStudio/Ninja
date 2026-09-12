@@ -1,10 +1,7 @@
 use anyhow::Context;
 
-use super::flatten_split_container;
-use crate::{
-  models::Container,
-  traits::{CommonGetters, TilingSizeGetters, MIN_TILING_SIZE},
-};
+use super::{distribute_tiling_size, flatten_split_container};
+use crate::{models::Container, traits::CommonGetters};
 
 /// Removes a container from the tree.
 ///
@@ -36,24 +33,46 @@ pub fn detach_container(child_to_remove: Container) -> anyhow::Result<()> {
   *child_to_remove.borrow_parent_mut() = None;
 
   // Resize the siblings if it is a tiling container.
-  if let Ok(child_to_remove) = child_to_remove.as_tiling_container() {
+  if child_to_remove.as_tiling_container().is_ok() {
     let tiling_siblings = parent.tiling_children().collect::<Vec<_>>();
-
-    // TODO: Share logic with `resize_tiling_container`.
-    let available_size =
-      tiling_siblings.iter().fold(0.0, |sum, container| {
-        sum + container.tiling_size() - MIN_TILING_SIZE
-      });
-
-    // Adjust size of the siblings based on the freed up space.
-    for sibling in &tiling_siblings {
-      let resize_factor =
-        (sibling.tiling_size() - MIN_TILING_SIZE) / available_size;
-
-      let size_delta = resize_factor * child_to_remove.tiling_size();
-      sibling.set_tiling_size(sibling.tiling_size() + size_delta);
-    }
+    distribute_tiling_size(&tiling_siblings, 1.0);
   }
 
   Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::detach_container;
+  use crate::{
+    models::{TilingWindow, Workspace},
+    traits::{TilingSizeGetters, MIN_TILING_SIZE},
+  };
+
+  #[test]
+  fn fills_freed_space_when_all_siblings_are_at_minimum() {
+    let removed = TilingWindow::mock().call();
+    let sibling_a = TilingWindow::mock().call();
+    let sibling_b = TilingWindow::mock().call();
+    let workspace = Workspace::mock()
+      .tiling_containers(vec![
+        removed.clone().into(),
+        sibling_a.clone().into(),
+        sibling_b.clone().into(),
+      ])
+      .call();
+
+    removed.set_tiling_size(1.0 - (2.0 * MIN_TILING_SIZE));
+    sibling_a.set_tiling_size(MIN_TILING_SIZE);
+    sibling_b.set_tiling_size(MIN_TILING_SIZE);
+
+    detach_container(removed.into()).unwrap();
+
+    assert!(sibling_a.tiling_size().is_finite());
+    assert!(sibling_b.tiling_size().is_finite());
+    assert!((sibling_a.tiling_size() - 0.5).abs() < f32::EPSILON);
+    assert!((sibling_b.tiling_size() - 0.5).abs() < f32::EPSILON);
+
+    drop(workspace);
+  }
 }

@@ -34,6 +34,11 @@ pub fn move_workspace_in_direction(
       state,
     )?;
 
+    // The user has chosen where this workspace goes, so drop any origin
+    // left over from a monitor teardown rather than moving it back on the
+    // next display change.
+    workspace.set_origin_monitor_id(None);
+
     let windows = workspace
       .descendants()
       .filter_map(|descendant| descendant.as_window_container().ok());

@@ -439,8 +439,45 @@ pub struct WorkspaceConfig {
   #[serde(default)]
   pub bind_to_monitor: Option<u32>,
 
+  /// Stable identifier of the monitor this workspace belongs to.
+  ///
+  /// Set by the `add-workspace` command and held in `workspaces.json`.
+  /// Takes precedence over `bind_to_monitor`, which is a monitor index
+  /// and so changes whenever the displays are rearranged. Not a
+  /// documented config option.
+  #[serde(default)]
+  pub bind_to_monitor_id: Option<String>,
+
   #[serde(default = "default_bool::<false>")]
   pub keep_alive: bool,
+}
+
+impl WorkspaceConfig {
+  /// Whether this workspace is tied to a particular monitor.
+  #[must_use]
+  pub fn is_bound(&self) -> bool {
+    self.bind_to_monitor_id.is_some() || self.bind_to_monitor.is_some()
+  }
+
+  /// Whether this workspace is bound to the monitor with the given stable
+  /// id and index.
+  ///
+  /// The stable id wins when this workspace has one, so a binding survives
+  /// the displays being rearranged. Falls back to the index for configs
+  /// that only declare `bind_to_monitor`.
+  #[must_use]
+  pub fn matches_monitor(
+    &self,
+    monitor_id: Option<&str>,
+    monitor_index: usize,
+  ) -> bool {
+    match &self.bind_to_monitor_id {
+      Some(bound_id) => monitor_id == Some(bound_id.as_str()),
+      None => self
+        .bind_to_monitor
+        .is_some_and(|index| index as usize == monitor_index),
+    }
+  }
 }
 
 /// Helper function for setting a default value for a boolean field.
@@ -569,5 +606,72 @@ mod tests {
     };
 
     assert!(config.scale_factor(1.).abs() < f32::EPSILON);
+  }
+}
+
+#[cfg(test)]
+mod workspace_binding_tests {
+  use super::WorkspaceConfig;
+
+  const PANEL: &str = r"\?\DISPLAY#ENC2775";
+
+  fn config(
+    bind_to_monitor: Option<u32>,
+    bind_to_monitor_id: Option<&str>,
+  ) -> WorkspaceConfig {
+    WorkspaceConfig {
+      name: "1".to_string(),
+      display_name: None,
+      bind_to_monitor,
+      bind_to_monitor_id: bind_to_monitor_id.map(ToString::to_string),
+      keep_alive: false,
+    }
+  }
+
+  #[test]
+  fn an_unbound_workspace_matches_no_monitor() {
+    let config = config(None, None);
+
+    assert!(!config.is_bound());
+    assert!(!config.matches_monitor(Some(PANEL), 0));
+  }
+
+  #[test]
+  fn a_monitor_id_matches_the_panel_whatever_its_position() {
+    // The bug this guards: binding by index sent the workspace to
+    // whichever monitor happened to sit at that position after a
+    // display change.
+    let config = config(None, Some(PANEL));
+
+    assert!(config.matches_monitor(Some(PANEL), 0));
+    assert!(config.matches_monitor(Some(PANEL), 3));
+    assert!(!config.matches_monitor(Some(r"\?\DISPLAY#TSB2017"), 0));
+  }
+
+  #[test]
+  fn a_monitor_id_wins_over_a_stale_index() {
+    let config = config(Some(1), Some(PANEL));
+
+    // Right index, wrong panel.
+    assert!(!config.matches_monitor(Some(r"\?\DISPLAY#TSB2017"), 1));
+    // Wrong index, right panel.
+    assert!(config.matches_monitor(Some(PANEL), 0));
+  }
+
+  #[test]
+  fn falls_back_to_the_index_without_a_monitor_id() {
+    // How a hand-written `bind_to_monitor` config keeps working.
+    let config = config(Some(1), None);
+
+    assert!(config.is_bound());
+    assert!(config.matches_monitor(Some(PANEL), 1));
+    assert!(!config.matches_monitor(Some(PANEL), 0));
+  }
+
+  #[test]
+  fn a_bound_id_does_not_match_an_unidentifiable_monitor() {
+    let config = config(Some(0), Some(PANEL));
+
+    assert!(!config.matches_monitor(None, 0));
   }
 }

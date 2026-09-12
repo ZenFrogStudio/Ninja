@@ -60,7 +60,7 @@ impl NetworkProvider {
   }
 
   fn run_interval(&mut self) -> anyhow::Result<NetworkOutput> {
-    self.netinfo.refresh();
+    self.netinfo.refresh(false);
 
     let interfaces = netdev::get_interfaces();
     let default_interface = netdev::get_default_interface().ok();

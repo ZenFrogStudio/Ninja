@@ -25,7 +25,7 @@ export type UpdateWidgetPackArgs = {
   tags?: string[];
   previewImages?: string[];
   repositoryUrl?: string;
-  widgets?: string[];
+  widgets?: WidgetConfig[];
 };
 
 export type CreateWidgetArgs = {

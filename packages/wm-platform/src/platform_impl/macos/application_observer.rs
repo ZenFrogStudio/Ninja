@@ -1,6 +1,6 @@
 use std::{
   ptr::NonNull,
-  sync::{Arc, Mutex},
+  sync::{Arc, Mutex, MutexGuard, PoisonError},
 };
 
 use objc2_application_services::{AXError, AXObserver, AXUIElement};
@@ -30,6 +30,17 @@ const AX_WINDOW_NOTIFICATIONS: &[&str] = &[
   "AXWindowMiniaturized",
 ];
 
+/// Locks a list of application windows, recovering from a poisoned mutex.
+///
+/// The mutex guards a plain vector, so a panic elsewhere leaves the list
+/// itself intact. Recovering keeps window events flowing instead of
+/// poisoning every later observer callback.
+fn lock_windows(
+  app_windows: &Mutex<Vec<crate::NativeWindow>>,
+) -> MutexGuard<'_, Vec<crate::NativeWindow>> {
+  app_windows.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 /// Context passed to the application event callback.
 #[derive(Debug)]
 struct ApplicationEventContext {
@@ -50,6 +61,11 @@ pub(crate) struct ApplicationObserver {
 }
 
 // TODO: Remove this.
+// SAFETY: `AXObserver` and `CFRunLoopSource` use atomic reference counts,
+// and the only cross-thread use is dropping the observer, which just
+// invalidates the source. Core Foundation documents that as thread-safe.
+// The notification callback always runs on the run loop it was
+// registered on.
 unsafe impl Send for ApplicationObserver {}
 
 impl ApplicationObserver {
@@ -62,6 +78,10 @@ impl ApplicationObserver {
     events_tx: mpsc::UnboundedSender<WindowEvent>,
     is_startup: bool,
   ) -> crate::Result<Self> {
+    // SAFETY: `window_event_callback` has the signature that
+    // `AXObserverCallback` expects, and `CFRetained::retain` is only
+    // reached with a non-null pointer that `AXObserver::create` reported
+    // as successfully created.
     let observer = unsafe {
       let mut observer = std::ptr::null_mut();
 
@@ -96,7 +116,12 @@ impl ApplicationObserver {
     let runloop =
       CFRunLoop::current().ok_or(crate::Error::EventLoopStopped)?;
 
+    // SAFETY: `observer` is a live `AXObserver` retained by this scope,
+    // so the run loop source it owns (`Get` rule) is valid here.
     let observer_source = unsafe { observer.run_loop_source() };
+    // SAFETY: `kCFRunLoopDefaultMode` is a Core Foundation extern static
+    // that is never mutated and stays alive for the lifetime of the
+    // process.
     runloop.add_source(Some(&observer_source), unsafe {
       kCFRunLoopDefaultMode
     });
@@ -106,7 +131,7 @@ impl ApplicationObserver {
     Self::register_app_notifications(app, &observer, context)?;
 
     // Emit `WindowEvent::Shown` for all existing windows.
-    for window in app_windows.lock().unwrap().iter() {
+    for window in lock_windows(&app_windows).iter() {
       if let Err(err) =
         Self::register_window_notifications(window, &observer, context)
       {
@@ -148,6 +173,9 @@ impl ApplicationObserver {
     context: *mut ApplicationEventContext,
   ) -> crate::Result<()> {
     for notification in AX_APP_NOTIFICATIONS {
+      // SAFETY: `app.ax_element` is a live `AXUIElement`, and `context`
+      // points to the `ApplicationEventContext` leaked in `new`, so it
+      // stays valid for as long as the notification is registered.
       unsafe {
         let notification_cfstr = CFString::from_static_str(notification);
         let result = observer.add_notification(
@@ -174,6 +202,9 @@ impl ApplicationObserver {
     context: *mut ApplicationEventContext,
   ) -> crate::Result<()> {
     for notification in AX_WINDOW_NOTIFICATIONS {
+      // SAFETY: The window's `AXUIElement` is live, and `context` points
+      // to the `ApplicationEventContext` leaked in `new`, so it stays
+      // valid for as long as the notification is registered.
       unsafe {
         let notification_cfstr = CFString::from_static_str(notification);
         let result = observer.add_notification(
@@ -197,7 +228,7 @@ impl ApplicationObserver {
   }
 
   pub(crate) fn emit_all_windows_destroyed(&self) {
-    for window in self.app_windows.lock().unwrap().iter() {
+    for window in lock_windows(&self.app_windows).iter() {
       if let Err(err) = self.events_tx.send(WindowEvent::Destroyed {
         window_id: window.id(),
         notification: crate::WindowEventNotification(None),
@@ -212,7 +243,7 @@ impl ApplicationObserver {
   }
 
   pub(crate) fn emit_all_windows_hidden(&self) {
-    for window in self.app_windows.lock().unwrap().iter() {
+    for window in lock_windows(&self.app_windows).iter() {
       if let Err(err) = self.events_tx.send(WindowEvent::Hidden {
         window: window.clone(),
         notification: crate::WindowEventNotification(None),
@@ -227,7 +258,7 @@ impl ApplicationObserver {
   }
 
   pub(crate) fn emit_all_windows_shown(&self) {
-    for window in self.app_windows.lock().unwrap().iter() {
+    for window in lock_windows(&self.app_windows).iter() {
       if let Err(err) = self.events_tx.send(WindowEvent::Shown {
         window: window.clone(),
         notification: crate::WindowEventNotification(None),
@@ -242,6 +273,13 @@ impl ApplicationObserver {
   }
 
   /// Callback function for accessibility window events.
+  ///
+  /// # Safety
+  ///
+  /// `context` must be the `ApplicationEventContext` pointer registered
+  /// with `AXObserver::add_notification`, and `element` must be the live
+  /// `AXUIElement` that the accessibility API passes in. Only the
+  /// observer's run loop may invoke this.
   #[allow(clippy::too_many_lines)]
   unsafe extern "C-unwind" fn window_event_callback(
     _observer: NonNull<AXObserver>,
@@ -254,7 +292,13 @@ impl ApplicationObserver {
       return;
     }
 
+    // SAFETY: `context` is the leaked `ApplicationEventContext` per this
+    // function's contract, checked non-null above. Callbacks are
+    // serialised on the observer's run loop, so the borrow is unaliased.
     let context = &mut *context.cast::<ApplicationEventContext>();
+    // SAFETY: `element` is the live `AXUIElement` passed in by the
+    // accessibility API, which follows the `Get` rule, so it is retained
+    // here to keep it alive beyond the callback.
     let ax_element = unsafe { CFRetained::retain(element) };
     let notification = WindowEventNotificationInner {
       name: notification_name.as_ref().to_string(),
@@ -268,7 +312,7 @@ impl ApplicationObserver {
     );
 
     let found_window = {
-      let app_windows = context.app_windows.lock().unwrap();
+      let app_windows = lock_windows(&context.app_windows);
 
       app_windows
         .iter()
@@ -280,10 +324,7 @@ impl ApplicationObserver {
 
     if notification.name.as_str() == "AXUIElementDestroyed" {
       if let Some(window) = &found_window {
-        context
-          .app_windows
-          .lock()
-          .unwrap()
+        lock_windows(&context.app_windows)
           .retain(|w| w.id() != window.id());
 
         if let Err(err) = context.events_tx.send(WindowEvent::Destroyed {
@@ -313,7 +354,7 @@ impl ApplicationObserver {
     });
 
     if is_new_window {
-      context.app_windows.lock().unwrap().push(window.clone());
+      lock_windows(&context.app_windows).push(window.clone());
       let _ = Self::register_window_notifications(
         &window,
         &context.observer.clone(),

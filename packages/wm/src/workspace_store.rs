@@ -22,9 +22,21 @@ pub struct StoredWorkspace {
 
   /// Index of the monitor the workspace belongs to.
   ///
-  /// Required for the workspace to reappear on startup, since only bound
-  /// workspaces are activated when a monitor is attached.
+  /// Only written by versions that predate `bind_to_monitor_id`, and kept
+  /// as a fallback so their stores keep working. A monitor index changes
+  /// whenever the displays are rearranged, so it can't identify a panel
+  /// on its own.
+  #[serde(default)]
   pub bind_to_monitor: Option<u32>,
+
+  /// Stable identifier of the monitor the workspace belongs to.
+  ///
+  /// Required for the workspace to reappear on the right screen, since
+  /// only bound workspaces are activated when a monitor is attached.
+  /// `None` when the platform couldn't identify the panel, in which
+  /// case `bind_to_monitor` carries the binding instead.
+  #[serde(default)]
+  pub bind_to_monitor_id: Option<String>,
 }
 
 impl StoredWorkspace {
@@ -37,6 +49,7 @@ impl StoredWorkspace {
       name: self.name.clone(),
       display_name: None,
       bind_to_monitor: self.bind_to_monitor,
+      bind_to_monitor_id: self.bind_to_monitor_id.clone(),
       keep_alive: true,
     }
   }
@@ -151,6 +164,16 @@ mod tests {
     StoredWorkspace {
       name: name.to_string(),
       bind_to_monitor: monitor,
+      bind_to_monitor_id: None,
+    }
+  }
+
+  /// A store entry bound to a panel rather than a monitor index.
+  fn stored_by_id(name: &str, monitor_id: &str) -> StoredWorkspace {
+    StoredWorkspace {
+      name: name.to_string(),
+      bind_to_monitor: None,
+      bind_to_monitor_id: Some(monitor_id.to_string()),
     }
   }
 
@@ -159,6 +182,7 @@ mod tests {
       name: name.to_string(),
       display_name: None,
       bind_to_monitor: Some(0),
+      bind_to_monitor_id: None,
       keep_alive: true,
     }
   }
@@ -190,10 +214,36 @@ mod tests {
 
   #[test]
   fn round_trips_through_serialization() {
-    let workspaces = vec![stored("10", Some(1)), stored("11", None)];
+    let workspaces = vec![
+      stored("10", Some(1)),
+      stored("11", None),
+      stored_by_id("12", r"\\?\DISPLAY#ENC2775"),
+    ];
     let parsed = parse(&serialize(&workspaces).unwrap()).unwrap();
 
     assert_eq!(parsed, workspaces);
+  }
+
+  #[test]
+  fn parses_a_store_written_before_monitor_ids() {
+    // Stores written by earlier versions carry only an index, and have to
+    // keep binding by it.
+    let parsed = parse(r#"[{"name":"5","bindToMonitor":1}]"#).unwrap();
+
+    assert_eq!(parsed, vec![stored("5", Some(1))]);
+    assert_eq!(parsed[0].to_config().bind_to_monitor, Some(1));
+  }
+
+  #[test]
+  fn a_monitor_id_survives_the_conversion_to_config() {
+    let config = stored_by_id("5", r"\\?\DISPLAY#ENC2775").to_config();
+
+    assert_eq!(
+      config.bind_to_monitor_id.as_deref(),
+      Some(r"\\?\DISPLAY#ENC2775")
+    );
+    assert_eq!(config.bind_to_monitor, None);
+    assert!(config.is_bound());
   }
 
   #[test]

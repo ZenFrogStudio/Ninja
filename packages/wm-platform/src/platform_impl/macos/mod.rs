@@ -1,5 +1,6 @@
 mod application;
 mod application_observer;
+mod auto_launch;
 mod ax_ui_element;
 mod ax_value;
 mod display;
@@ -16,6 +17,7 @@ mod window_listener;
 
 pub(crate) use application::*;
 pub(crate) use application_observer::*;
+pub(crate) use auto_launch::*;
 pub(crate) use ax_ui_element::*;
 pub(crate) use ax_value::*;
 pub(crate) use display::*;

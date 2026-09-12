@@ -2,10 +2,14 @@
 
 A tiling window manager for Windows, unified with a built-in status bar.
 
+![My image](media/Screenshot_1.png)
+
 Good design eliminates the unnecessary. Ninja arranges windows systematically and provides precise keyboard navigation. The status bar—displaying workspaces, system metrics, media, and the system tray—operates within the same process as the window manager. One installation. One execution. No redundancy.
 
 ## Provenance
 Ninja is a deliberate evolution of GlazeWM, with Zebar integrated directly into its core. It builds upon established foundations to reduce system fragmentation and simplify the user environment.
+
+![My image](media/screenshot_2.png)
 
 ## Implementation
 
@@ -23,6 +27,8 @@ Control is centralized and transparent. The primary configuration resides at `~/
 | `~/.ninja/bar/` | Status bar settings and widget modules. |
 
 Alternative configuration paths are supported via command-line arguments (`ninja start --config <path>`) or environment variables (`NINJA_CONFIG_PATH`). Legacy configurations from `~/.glzr/` are migrated automatically and non-destructively on first run.
+
+![My image](media/screenshot_3.png)
 
 ## Compilation
 

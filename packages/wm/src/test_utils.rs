@@ -257,6 +257,7 @@ impl Workspace {
       name,
       display_name,
       bind_to_monitor: None,
+      bind_to_monitor_id: None,
       keep_alive: false,
     };
 

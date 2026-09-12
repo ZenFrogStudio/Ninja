@@ -2,9 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "settings-ui",
   "description": "Settings UI capabilities",
-  "windows": [
-    "settings"
-  ],
+  "windows": ["settings"],
   "permissions": [
     "core:app:default",
     "core:event:default",
@@ -29,8 +27,6 @@
     "allow-listen-provider",
     "allow-unlisten-provider",
     "allow-call-provider-function",
-    "allow-start-preview-widget",
-    "allow-stop-all-preview-widgets",
     "allow-read-wm-settings",
     "allow-write-wm-settings"
   ]

@@ -75,6 +75,9 @@ impl NativeWindow {
   #[allow(clippy::unnecessary_wraps)]
   pub(crate) fn title(&self) -> crate::Result<String> {
     let mut text: [u16; 512] = [0; 512];
+    // SAFETY: `text` outlives the call and the API takes its capacity
+    // from the slice, so the write stays in bounds. A handle that no
+    // longer names a window makes the call return 0.
     let length = unsafe { GetWindowTextW(self.hwnd(), &mut text) };
 
     #[allow(clippy::cast_sign_loss)]
@@ -84,10 +87,16 @@ impl NativeWindow {
   /// Implements [`NativeWindow::process_name`].
   pub(crate) fn process_name(&self) -> crate::Result<String> {
     let mut process_id = 0u32;
+    // SAFETY: `process_id` is a live local that outlives the call, and
+    // is the `u32` the API writes through that out-pointer. A handle
+    // that no longer names a window leaves it at 0.
     unsafe {
       GetWindowThreadProcessId(self.hwnd(), Some(&raw mut process_id));
     }
 
+    // SAFETY: Only plain values are passed, and the call reports an
+    // error for a process that has already exited. The returned handle
+    // is owned by us and closed below.
     let process_handle = unsafe {
       OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id)
     }?;
@@ -95,6 +104,10 @@ impl NativeWindow {
     let mut buffer = [0u16; 256];
     let mut length = u32::try_from(buffer.len())?;
 
+    // SAFETY: `buffer` and `length` are live locals that outlive the
+    // call, and `length` holds the buffer's capacity in wide characters
+    // on entry, so the write stays in bounds. `process_handle` is owned
+    // by this function and isn't used after `CloseHandle`.
     unsafe {
       let query_res = QueryFullProcessImageNameW(
         process_handle,
@@ -126,6 +139,10 @@ impl NativeWindow {
   pub(crate) fn frame(&self) -> crate::Result<Rect> {
     let mut rect = RECT::default();
 
+    // SAFETY: `rect` is a live local that outlives the call, and the
+    // size passed is its own, matching the `RECT` that
+    // `DWMWA_EXTENDED_FRAME_BOUNDS` writes. DWM returns an error for a
+    // handle that no longer names a window.
     let dwm_res = unsafe {
       #[allow(clippy::cast_possible_truncation)]
       DwmGetWindowAttribute(
@@ -163,11 +180,15 @@ impl NativeWindow {
 
   /// Implements [`NativeWindow::is_valid`].
   pub(crate) fn is_valid(&self) -> bool {
+    // SAFETY: `IsWindow` exists to test handles, and returns false for
+    // one that no longer names a window.
     unsafe { IsWindow(self.hwnd()) }.as_bool()
   }
 
   /// Implements [`NativeWindow::is_visible`].
   pub(crate) fn is_visible(&self) -> crate::Result<bool> {
+    // SAFETY: `IsWindowVisible` takes no pointers and returns false for
+    // a handle that no longer names a window.
     let is_visible = unsafe { IsWindowVisible(self.hwnd()) }.as_bool();
 
     Ok(is_visible && !self.is_cloaked()?)
@@ -176,12 +197,16 @@ impl NativeWindow {
   /// Implements [`NativeWindow::is_minimized`].
   #[allow(clippy::unnecessary_wraps)]
   pub(crate) fn is_minimized(&self) -> crate::Result<bool> {
+    // SAFETY: `IsIconic` takes no pointers and returns false for a
+    // handle that no longer names a window.
     Ok(unsafe { IsIconic(self.hwnd()) }.as_bool())
   }
 
   /// Implements [`NativeWindow::is_maximized`].
   #[allow(clippy::unnecessary_wraps)]
   pub(crate) fn is_maximized(&self) -> crate::Result<bool> {
+    // SAFETY: `IsZoomed` takes no pointers and returns false for a
+    // handle that no longer names a window.
     Ok(unsafe { IsZoomed(self.hwnd()) }.as_bool())
   }
 
@@ -199,6 +224,9 @@ impl NativeWindow {
 
   /// Implements [`NativeWindow::set_frame`].
   pub(crate) fn set_frame(&self, rect: &Rect) -> crate::Result<()> {
+    // SAFETY: Only handles and plain values are passed, and the call
+    // returns an error rather than misbehaving if the window has since
+    // been destroyed.
     unsafe {
       SetWindowPos(
         self.hwnd(),
@@ -225,6 +253,9 @@ impl NativeWindow {
     width: i32,
     height: i32,
   ) -> crate::Result<()> {
+    // SAFETY: Only handles and plain values are passed, and the call
+    // returns an error rather than misbehaving if the window has since
+    // been destroyed.
     unsafe {
       SetWindowPos(
         self.hwnd(),
@@ -248,6 +279,9 @@ impl NativeWindow {
 
   /// Implements [`NativeWindow::reposition`].
   pub(crate) fn reposition(&self, x: i32, y: i32) -> crate::Result<()> {
+    // SAFETY: Only handles and plain values are passed, and the call
+    // returns an error rather than misbehaving if the window has since
+    // been destroyed.
     unsafe {
       SetWindowPos(
         self.hwnd(),
@@ -271,12 +305,18 @@ impl NativeWindow {
 
   /// Implements [`NativeWindow::minimize`].
   pub(crate) fn minimize(&self) -> crate::Result<()> {
+    // SAFETY: `ShowWindowAsync` only posts to the window's own thread.
+    // It takes no pointers and fails cleanly on a handle that no longer
+    // names a window.
     unsafe { ShowWindowAsync(self.hwnd(), SW_MINIMIZE).ok() }?;
     Ok(())
   }
 
   /// Implements [`NativeWindow::maximize`].
   pub(crate) fn maximize(&self) -> crate::Result<()> {
+    // SAFETY: `ShowWindowAsync` only posts to the window's own thread.
+    // It takes no pointers and fails cleanly on a handle that no longer
+    // names a window.
     unsafe { ShowWindowAsync(self.hwnd(), SW_MAXIMIZE).ok() }?;
     Ok(())
   }
@@ -295,12 +335,17 @@ impl NativeWindow {
 
     // Bypass restriction for setting the foreground window by sending an
     // input to our own process first.
+    // SAFETY: `input` is a live local that outlives the call, its length
+    // is taken from the slice, and the size passed is that of the
+    // `INPUT` elements it holds.
     #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
     unsafe {
       SendInput(&input, std::mem::size_of::<INPUT>() as i32)
     };
 
     // Set as the foreground window.
+    // SAFETY: Only a window handle is passed, and the call returns false
+    // for a handle that no longer names a window.
     unsafe { SetForegroundWindow(self.hwnd()) }.ok()?;
 
     Ok(())
@@ -308,6 +353,9 @@ impl NativeWindow {
 
   /// Implements [`NativeWindow::close`].
   pub(crate) fn close(&self) -> crate::Result<()> {
+    // SAFETY: `WM_CLOSE` carries no pointer payload, so both message
+    // parameters are `None`. The call returns an error for a handle that
+    // no longer names a window.
     unsafe { SendNotifyMessageW(self.hwnd(), WM_CLOSE, None, None) }?;
     Ok(())
   }
@@ -320,6 +368,9 @@ impl NativeWindow {
   /// Implements [`NativeWindowWindowsExt::class_name`].
   pub(crate) fn class_name(&self) -> crate::Result<String> {
     let mut buffer = [0u16; 256];
+    // SAFETY: `buffer` outlives the call and the API takes its capacity
+    // from the slice, so the write stays in bounds. A handle that no
+    // longer names a window makes the call return 0.
     let result = unsafe { GetClassNameW(self.hwnd(), &mut buffer) };
 
     if result == 0 {
@@ -335,6 +386,8 @@ impl NativeWindow {
   pub(crate) fn frame_with_shadows(&self) -> crate::Result<Rect> {
     let mut rect = RECT::default();
 
+    // SAFETY: `rect` is a live local that outlives the call, and is the
+    // `RECT` the API writes through that out-pointer.
     unsafe {
       GetWindowRect(self.hwnd(), std::ptr::from_mut(&mut rect).cast())
     }?;
@@ -364,12 +417,18 @@ impl NativeWindow {
 
   /// Implements [`NativeWindowWindowsExt::has_owner_window`].
   pub(crate) fn has_owner_window(&self) -> bool {
+    // SAFETY: Only a window handle is passed, and the call reports an
+    // error instead of a handle when the window has no owner or no
+    // longer exists.
     unsafe { GetWindow(self.hwnd(), GW_OWNER) }
       .is_ok_and(|owner| !owner.0.is_null())
   }
 
   /// Implements [`NativeWindowWindowsExt::has_window_style`].
   pub(crate) fn has_window_style(&self, style: WINDOW_STYLE) -> bool {
+    // SAFETY: `GWL_STYLE` is a valid index for any window, the call
+    // takes no pointers, and it returns 0 for a handle that no longer
+    // names a window.
     let current_style =
       unsafe { GetWindowLongPtrW(self.hwnd(), GWL_STYLE) };
 
@@ -383,6 +442,9 @@ impl NativeWindow {
     &self,
     style: WINDOW_EX_STYLE,
   ) -> bool {
+    // SAFETY: `GWL_EXSTYLE` is a valid index for any window, the call
+    // takes no pointers, and it returns 0 for a handle that no longer
+    // names a window.
     let current_style =
       unsafe { GetWindowLongPtrW(self.hwnd(), GWL_EXSTYLE) };
 
@@ -407,6 +469,9 @@ impl NativeWindow {
       }
     };
 
+    // SAFETY: Only handles and plain values are passed. `z_order_hwnd`
+    // is either a predefined placement value or a handle we tracked, and
+    // the call returns an error if either window has been destroyed.
     unsafe {
       SetWindowPos(
         self.hwnd(),
@@ -424,12 +489,18 @@ impl NativeWindow {
 
   /// Implements [`NativeWindowWindowsExt::show`].
   pub(crate) fn show(&self) -> crate::Result<()> {
+    // SAFETY: `ShowWindowAsync` only posts to the window's own thread.
+    // It takes no pointers and fails cleanly on a handle that no longer
+    // names a window.
     unsafe { ShowWindowAsync(self.hwnd(), SW_SHOWNA) }.ok()?;
     Ok(())
   }
 
   /// Implements [`NativeWindowWindowsExt::hide`].
   pub(crate) fn hide(&self) -> crate::Result<()> {
+    // SAFETY: `ShowWindowAsync` only posts to the window's own thread.
+    // It takes no pointers and fails cleanly on a handle that no longer
+    // names a window.
     unsafe { ShowWindowAsync(self.hwnd(), SW_HIDE) }.ok()?;
     Ok(())
   }
@@ -441,6 +512,9 @@ impl NativeWindow {
   ) -> crate::Result<()> {
     match outer_frame {
       None => {
+        // SAFETY: `ShowWindowAsync` only posts to the window's own
+        // thread. It takes no pointers and fails cleanly on a handle
+        // that no longer names a window.
         unsafe { ShowWindowAsync(self.hwnd(), SW_RESTORE) }.ok()?;
         Ok(())
       }
@@ -459,6 +533,9 @@ impl NativeWindow {
           ..Default::default()
         };
 
+        // SAFETY: `placement` is a live local that outlives the call,
+        // with its `length` field set to its own size as the API
+        // requires.
         unsafe { SetWindowPlacement(self.hwnd(), &raw const placement) }?;
         Ok(())
       }
@@ -472,6 +549,9 @@ impl NativeWindow {
         let view_collection = com.application_view_collection()?;
 
         let mut view: Option<IApplicationView> = None;
+        // SAFETY: `view_collection` is a live COM interface created by
+        // `ComInit` on this thread, where `CoInitializeEx` ran. `view`
+        // is a live local out-parameter that outlives the call.
         unsafe {
           view_collection
             .get_view_for_hwnd(self.hwnd().0 as isize, &raw mut view)
@@ -485,6 +565,9 @@ impl NativeWindow {
         })?;
 
         // Ref: https://github.com/Ciantic/AltTabAccessor/issues/1#issuecomment-1426877843
+        // SAFETY: `view` is a live COM interface obtained above on this
+        // thread, and both arguments are the plain integers that the
+        // vtable entry expects.
         unsafe { view.set_cloak(1, if cloaked { 2 } else { 0 }) }
           .ok()
           .map_err(|_| {
@@ -503,6 +586,9 @@ impl NativeWindow {
       com_init.borrow_mut().with_retry(|com| {
         let taskbar_list = com.taskbar_list()?;
 
+        // SAFETY: `taskbar_list` is a live COM interface created by
+        // `ComInit` on this thread, where `CoInitializeEx` ran, and only
+        // a window handle and a flag are passed.
         unsafe {
           taskbar_list.MarkFullscreenWindow(self.hwnd(), fullscreen)
         }?;
@@ -522,8 +608,14 @@ impl NativeWindow {
         let taskbar_list = com.taskbar_list()?;
 
         if visible {
+          // SAFETY: `taskbar_list` is a live COM interface created by
+          // `ComInit` on this thread, where `CoInitializeEx` ran, and
+          // only a window handle is passed.
           unsafe { taskbar_list.AddTab(self.hwnd())? };
         } else {
+          // SAFETY: `taskbar_list` is a live COM interface created by
+          // `ComInit` on this thread, where `CoInitializeEx` ran, and
+          // only a window handle is passed.
           unsafe { taskbar_list.DeleteTab(self.hwnd())? };
         }
 
@@ -534,6 +626,9 @@ impl NativeWindow {
 
   /// Implements [`NativeWindowWindowsExt::add_window_style_ex`].
   pub(crate) fn add_window_style_ex(&self, style: WINDOW_EX_STYLE) {
+    // SAFETY: `GWL_EXSTYLE` is a valid index for any window, the call
+    // takes no pointers, and it returns 0 for a handle that no longer
+    // names a window.
     let current_style =
       unsafe { GetWindowLongPtrW(self.hwnd(), GWL_EXSTYLE) };
 
@@ -541,6 +636,9 @@ impl NativeWindow {
     if current_style & style.0 as isize == 0 {
       let new_style = current_style | style.0 as isize;
 
+      // SAFETY: `new_style` is the value just read back with the
+      // requested bits added, so it stays a valid extended style, and
+      // the call takes no pointers.
       unsafe { SetWindowLongPtrW(self.hwnd(), GWL_EXSTYLE, new_style) };
     }
   }
@@ -566,6 +664,9 @@ impl NativeWindow {
       | SWP_NOMOVE
       | SWP_NOSIZE;
 
+    // SAFETY: Only handles and plain values are passed. `z_order_hwnd`
+    // is either a predefined placement value or a handle we tracked, and
+    // the call returns an error if either window has been destroyed.
     unsafe { SetWindowPos(self.hwnd(), z_order_hwnd, 0, 0, 0, 0, flags) }?;
 
     // Z-order can sometimes still be incorrect after the above call.
@@ -578,6 +679,10 @@ impl NativeWindow {
     task::spawn(async move {
       tokio::time::sleep(Duration::from_millis(10)).await;
 
+      // SAFETY: Both handles are rebuilt from the `isize` values copied
+      // into the task, and are only passed back to the OS. By the time
+      // this runs either window may be gone, which the call reports as
+      // an error.
       let _ = unsafe {
         SetWindowPos(
           HWND(handle as *mut std::ffi::c_void),
@@ -599,6 +704,9 @@ impl NativeWindow {
     &self,
     visible: bool,
   ) -> crate::Result<()> {
+    // SAFETY: `GWL_STYLE` is a valid index for any window, the call
+    // takes no pointers, and it returns 0 for a handle that no longer
+    // names a window.
     let style = unsafe { GetWindowLongPtrW(self.hwnd(), GWL_STYLE) };
 
     #[allow(clippy::cast_possible_wrap)]
@@ -609,6 +717,10 @@ impl NativeWindow {
     };
 
     if new_style != style {
+      // SAFETY: `new_style` is the style just read back with only the
+      // `WS_DLGFRAME` bit changed, so it stays a valid style. Neither
+      // call takes a pointer, and both report failure for a window that
+      // has since been destroyed.
       unsafe {
         SetWindowLongPtrW(self.hwnd(), GWL_STYLE, new_style);
         SetWindowPos(
@@ -644,6 +756,9 @@ impl NativeWindow {
       None => DWMWA_COLOR_NONE,
     };
 
+    // SAFETY: `bgr` is a live local that outlives the call, and the size
+    // passed is that of the `u32` colour value `DWMWA_BORDER_COLOR`
+    // reads.
     unsafe {
       #[allow(clippy::cast_possible_truncation)]
       DwmSetWindowAttribute(
@@ -669,6 +784,9 @@ impl NativeWindow {
       CornerStyle::SmallRounded => DWMWCP_ROUNDSMALL,
     };
 
+    // SAFETY: `corner_preference` is a live local that outlives the
+    // call, and the size passed is that of the `i32` that
+    // `DWMWA_WINDOW_CORNER_PREFERENCE` reads.
     unsafe {
       #[allow(clippy::cast_possible_truncation)]
       DwmSetWindowAttribute(
@@ -690,6 +808,8 @@ impl NativeWindow {
     // Make the window layered if it isn't already.
     self.add_window_style_ex(WS_EX_LAYERED);
 
+    // SAFETY: Only a handle and plain values are passed, and the window
+    // was just given the `WS_EX_LAYERED` style that this call requires.
     unsafe {
       SetLayeredWindowAttributes(
         self.hwnd(),
@@ -710,6 +830,9 @@ impl NativeWindow {
     let mut alpha = u8::MAX;
     let mut flag = LAYERED_WINDOW_ATTRIBUTES_FLAGS::default();
 
+    // SAFETY: `alpha` and `flag` are live locals that outlive the call,
+    // and are the types the API writes through those out-pointers. The
+    // call returns an error for a window that isn't layered.
     unsafe {
       GetLayeredWindowAttributes(
         self.hwnd(),
@@ -742,6 +865,8 @@ impl NativeWindow {
   fn is_cloaked(&self) -> crate::Result<bool> {
     let mut cloaked = 0u32;
 
+    // SAFETY: `cloaked` is a live local that outlives the call, and the
+    // size passed is that of the `u32` that `DWMWA_CLOAKED` writes.
     unsafe {
       #[allow(clippy::cast_possible_truncation)]
       DwmGetWindowAttribute(
@@ -782,10 +907,17 @@ pub(crate) fn visible_windows(
     data: LPARAM,
   ) -> BOOL {
     let handles = data.0 as *mut Vec<isize>;
+    // SAFETY: `data` is the `LPARAM` handed to `EnumWindows` below, so
+    // it points at the caller's `handles` vector. The callback only runs
+    // during that call, where the vector is alive and not otherwise
+    // borrowed.
     unsafe { (*handles).push(handle.0 as isize) };
     true.into()
   }
 
+  // SAFETY: `visible_windows_proc` has the signature `EnumWindows`
+  // expects, and `handles` outlives the call, which returns only once
+  // enumeration has finished.
   unsafe {
     EnumWindows(
       Some(visible_windows_proc),
@@ -815,10 +947,17 @@ pub(crate) fn cloaked_windows(
     data: LPARAM,
   ) -> BOOL {
     let handles = data.0 as *mut Vec<isize>;
+    // SAFETY: `data` is the `LPARAM` handed to `EnumWindows` below, so
+    // it points at the caller's `handles` vector. The callback only runs
+    // during that call, where the vector is alive and not otherwise
+    // borrowed.
     unsafe { (*handles).push(handle.0 as isize) };
     true.into()
   }
 
+  // SAFETY: `cloaked_windows_proc` has the signature `EnumWindows`
+  // expects, and `handles` outlives the call, which returns only once
+  // enumeration has finished.
   unsafe {
     EnumWindows(
       Some(cloaked_windows_proc),
@@ -833,6 +972,8 @@ pub(crate) fn cloaked_windows(
       // The complement of `visible_windows`: `WS_VISIBLE` is set, but a
       // cloak is keeping the window off the screen.
       .filter(|window| {
+        // SAFETY: `IsWindowVisible` takes no pointers and returns false
+        // for a handle that no longer names a window.
         unsafe { IsWindowVisible(window.hwnd()) }.as_bool()
           && window.is_cloaked().unwrap_or(false)
       })
@@ -846,6 +987,8 @@ pub(crate) fn cloaked_windows(
 pub(crate) fn focused_window(
   _: &Dispatcher,
 ) -> crate::Result<crate::NativeWindow> {
+  // SAFETY: The call takes no arguments, and returns null rather than a
+  // handle when no window currently has focus.
   let handle = unsafe { GetForegroundWindow() };
   Ok(NativeWindow::new(handle.0 as isize).into())
 }
@@ -861,11 +1004,16 @@ pub(crate) fn window_from_point(
     y: point.y,
   };
 
+  // SAFETY: `point` is passed by value, and the call returns null when
+  // no window covers it, which is checked below.
   let handle = unsafe { WindowFromPoint(point) };
   if handle.0.is_null() {
     return Ok(None);
   }
 
+  // SAFETY: `handle` was just returned by `WindowFromPoint` and checked
+  // to be non-null. The call takes no pointers and returns null if the
+  // window has gone away since.
   let root = unsafe { GetAncestor(handle, GA_ROOT) };
   if root.0.is_null() {
     return Ok(None);
@@ -886,9 +1034,13 @@ pub(crate) fn reset_focus(_dispatcher: &Dispatcher) -> crate::Result<()> {
 /// the wallpaper window.
 #[must_use]
 fn desktop_window() -> NativeWindow {
+  // SAFETY: The call takes no arguments, and returns null when
+  // explorer.exe isn't running, which is handled below.
   let shell_window = unsafe { GetShellWindow() };
 
   let handle = if shell_window.0.is_null() {
+    // SAFETY: The call takes no arguments and always returns the handle
+    // of the desktop window.
     unsafe { GetDesktopWindow() }
   } else {
     shell_window

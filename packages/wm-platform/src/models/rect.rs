@@ -209,8 +209,8 @@ impl Rect {
 
   #[must_use]
   pub fn contains_point(&self, point: &Point) -> bool {
-    let is_in_x = point.x >= self.left && point.x <= self.right;
-    let is_in_y = point.y >= self.top && point.y <= self.bottom;
+    let is_in_x = point.x >= self.left && point.x < self.right;
+    let is_in_y = point.y >= self.top && point.y < self.bottom;
     is_in_x && is_in_y
   }
 
@@ -292,5 +292,15 @@ mod tests {
     let r1 = Rect::from_xy(0, 0, 100, 100);
     let r2 = Rect::from_xy(100, 0, 100, 100);
     assert_eq!(r1.intersection_area(&r2), 0);
+  }
+
+  #[test]
+  fn contains_point_uses_half_open_edges() {
+    let rect = Rect::from_xy(0, 0, 100, 100);
+
+    assert!(rect.contains_point(&Point { x: 0, y: 0 }));
+    assert!(rect.contains_point(&Point { x: 99, y: 99 }));
+    assert!(!rect.contains_point(&Point { x: 100, y: 50 }));
+    assert!(!rect.contains_point(&Point { x: 50, y: 100 }));
   }
 }

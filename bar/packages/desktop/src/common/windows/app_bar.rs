@@ -40,6 +40,9 @@ pub fn create_app_bar(
     ..Default::default()
   };
 
+  // SAFETY: `data` is an owned `APPBARDATA` that outlives the call, with
+  // `cbSize` set to its own size so the shell reads the right number of
+  // bytes.
   if unsafe { SHAppBarMessage(ABM_NEW, &mut data) } == 0 {
     bail!("Failed to register new app bar.");
   }
@@ -53,6 +56,9 @@ pub fn create_app_bar(
   // rect that have an appbar on them.
   // e.g. { left: 0, top: 0, right: 1920, bottom: 40 }
   // -> { left: 0, top: 80, right: 1920, bottom: 40 } (top edge adjusted)
+  //
+  // SAFETY: The same owned `APPBARDATA` that `ABM_NEW` succeeded with;
+  // the shell reads and writes `rc` in place.
   if unsafe { SHAppBarMessage(ABM_QUERYPOS, &mut data) } == 0 {
     bail!("Failed to query for app bar position.");
   }
@@ -87,6 +93,9 @@ pub fn create_app_bar(
   };
 
   // Set position for it to actually reserve the size and position.
+  //
+  // SAFETY: The same owned `APPBARDATA` registered by `ABM_NEW`, with
+  // `rc` updated to the adjusted rect just computed.
   if unsafe { SHAppBarMessage(ABM_SETPOS, &mut data) } == 0 {
     bail!("Failed to set app bar position.");
   }
@@ -109,6 +118,9 @@ pub fn remove_app_bar(handle: isize) -> anyhow::Result<()> {
     ..Default::default()
   };
 
+  // SAFETY: `abd` is an owned `APPBARDATA` that outlives the call, with
+  // `cbSize` set to its own size. `ABM_REMOVE` only needs `hWnd`, and
+  // tolerates a handle that no longer has an app bar registered.
   match unsafe { SHAppBarMessage(ABM_REMOVE, &mut abd) } {
     0 => bail!("Failed to remove app bar."),
     _ => Ok(()),

@@ -481,9 +481,11 @@ impl MediaProvider {
     session: &GsmtcSession,
     session_id: &str,
   ) -> anyhow::Result<MediaSession> {
-    let mut session_output = MediaSession::default();
+    let mut session_output = MediaSession {
+      session_id: session_id.to_string(),
+      ..Default::default()
+    };
 
-    session_output.session_id = session_id.to_string();
     Self::update_media_properties(&mut session_output, session)?;
     Self::update_timeline_properties(&mut session_output, session)?;
     Self::update_playback_info(&mut session_output, session)?;

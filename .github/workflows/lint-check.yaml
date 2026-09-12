@@ -51,16 +51,22 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm --filter ninja build
 
+      - name: Test client API
+        working-directory: bar
+        run: pnpm --filter ninja test
+
       # Clippy itself runs `cargo check`, so this also catches compile errors.
-      # Warnings are only fatal for our own crates; the vendored bar is kept
-      # close to upstream so that merges stay tractable.
+      # Warnings are fatal for the WM crates and the bar alike.
       - name: Check linting (clippy)
         run: >
           cargo clippy
           -p wm -p wm-cli -p wm-common -p wm-ipc-client
-          -p wm-macros -p wm-platform -p wm-watcher
+          -p wm-macros -p wm-platform -p wm-watcher -p ninja
           --all-targets --all-features -- -D warnings
 
-      - name: Check linting of vendored bar (non-fatal)
-        continue-on-error: true
-        run: cargo clippy -p ninja --all-targets
+      # `wm-watcher` is Windows-only, so it's excluded from the macOS run.
+      - name: Run tests
+        env:
+          SCOPE: ${{ matrix.platform != 'windows-latest' && '--exclude wm-watcher' || '' }}
+        shell: bash
+        run: cargo test --workspace --locked $SCOPE

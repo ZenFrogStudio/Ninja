@@ -196,34 +196,6 @@ pub async fn call_provider_function(
     .map_err(|err| err.to_string())
 }
 
-#[tauri::command]
-pub async fn start_preview_widget(
-  pack_config: WidgetPack,
-  widget_name: String,
-  preset_name: String,
-  widget_factory: State<'_, Arc<WidgetFactory>>,
-) -> anyhow::Result<(), String> {
-  widget_factory
-    .start_widget_by_pack(
-      &pack_config,
-      &widget_name,
-      &WidgetOpenOptions::Preset(preset_name),
-      true,
-    )
-    .await
-    .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
-pub async fn stop_all_preview_widgets(
-  widget_factory: State<'_, Arc<WidgetFactory>>,
-) -> anyhow::Result<(), String> {
-  widget_factory
-    .stop_all_previews()
-    .await
-    .map_err(|err| err.to_string())
-}
-
 /// Tauri's implementation of `always_on_top` places the window above
 /// all normal windows (but not the MacOS menu bar). The following instead
 /// sets the z-order of the window to be above the menu bar.
@@ -289,19 +261,25 @@ pub async fn shell_spawn(
 pub async fn shell_write(
   pid: shell_util::ProcessId,
   buffer: shell_util::Buffer,
+  window: Window,
   shell_state: State<'_, ShellState>,
 ) -> anyhow::Result<(), String> {
+  let widget_id = window.label();
   shell_state
-    .write(pid, buffer)
+    .write(widget_id, pid, buffer)
     .map_err(|err| err.to_string())
 }
 
 #[tauri::command]
 pub async fn shell_kill(
   pid: shell_util::ProcessId,
+  window: Window,
   shell_state: State<'_, ShellState>,
 ) -> anyhow::Result<(), String> {
-  shell_state.kill(pid).map_err(|err| err.to_string())
+  let widget_id = window.label();
+  shell_state
+    .kill(widget_id, pid)
+    .map_err(|err| err.to_string())
 }
 
 #[tauri::command]
