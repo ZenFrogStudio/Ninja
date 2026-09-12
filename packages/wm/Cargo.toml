@@ -19,7 +19,6 @@ ui_access = []
 
 [dependencies]
 anyhow = { workspace = true }
-auto-launch = "0.5"
 ambassador = "0.4"
 clap = { workspace = true }
 enum-as-inner = "0.6"

@@ -11,7 +11,6 @@ use std::{
 };
 
 use anyhow::Context;
-use auto_launch::AutoLaunch;
 use tokio::sync::mpsc;
 use tray_icon::{
   menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem},
@@ -102,11 +101,7 @@ impl SystemTray {
     }));
 
     let run_on_startup_enabled = Arc::new(AtomicBool::new(
-      auto_launch_instance()
-        .and_then(|auto_launch| {
-          auto_launch.is_enabled().map_err(Into::into)
-        })
-        .unwrap_or(false),
+      wm_platform::is_run_on_startup_enabled().unwrap_or(false),
     ));
 
     let tray_icon = dispatcher.dispatch_sync(|| {
@@ -363,11 +358,7 @@ impl SystemTray {
       TrayMenuId::RunOnStartup => {
         let is_enabled = run_on_startup_enabled.load(Ordering::SeqCst);
 
-        if is_enabled {
-          auto_launch_instance()?.disable()?;
-        } else {
-          auto_launch_instance()?.enable()?;
-        }
+        wm_platform::set_run_on_startup(!is_enabled)?;
 
         run_on_startup_enabled.store(!is_enabled, Ordering::SeqCst);
         Ok(())
@@ -378,19 +369,4 @@ impl SystemTray {
       }
     }
   }
-}
-
-/// Creates a new [`AutoLaunch`] instance for managing auto-launch at
-/// system startup.
-fn auto_launch_instance() -> anyhow::Result<AutoLaunch> {
-  let exe_path = std::env::current_exe()?.to_string_lossy().to_string();
-  let args: [&str; 0] = [];
-
-  #[cfg(target_os = "windows")]
-  let instance = AutoLaunch::new("Ninja", &exe_path, &args);
-
-  #[cfg(target_os = "macos")]
-  let instance = AutoLaunch::new("Ninja", &exe_path, false, &args);
-
-  Ok(instance)
 }

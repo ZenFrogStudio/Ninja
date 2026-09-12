@@ -61,7 +61,6 @@
       <ComponentRef Id="Custom_AddDesktopShortcut" />
       <ComponentRef Id="Custom_AddStartMenuShortcut" />
       <ComponentRef Id="Custom_AddPathEnv" />
-      <ComponentRef Id="Custom_RemoveAutoLaunchRegistry" />
     </Feature>
 
     <!--
@@ -155,25 +154,37 @@
       />
     </Component>
 
-    <!-- Remove auto-launch registry values on uninstall. -->
-    <Component Id="Custom_RemoveAutoLaunchRegistry" Guid="B1A2C3D4-E5F6-47A8-9B0C-1234567890AB">
-      <!-- `RegistryValue` with `KeyPath="yes"` is needed for component state tracking. -->
-      <RegistryValue
-        Root="HKLM"
-        Key="SOFTWARE\Ninja\wm"
-        Name="AutoLaunchCleanup"
-        Type="integer"
-        Value="1"
-        KeyPath="yes"
+    <!--
+      Removes the "Run on system startup" entry the app writes, so an
+      uninstall doesn't leave Explorer trying to launch a missing exe at
+      every logon.
+
+      A custom action rather than `RemoveRegistryValue`: that element
+      deletes the value when its component is *installed*, so it wiped
+      the user's startup setting on every upgrade. Windows Installer has
+      no built-in way to remove a single value on uninstall.
+
+      Runs only on a real uninstall. `UPGRADINGPRODUCTCODE` is set while
+      an older version is being replaced, and the entry has to survive
+      that. Impersonated so `HKCU` is the user's hive rather than
+      SYSTEM's. `TARGETDIR` is the working directory because the install
+      folder is already gone by this point.
+    -->
+    <CustomAction
+      Id="Custom_RemoveRunEntry"
+      Directory="TARGETDIR"
+      ExeCommand="&quot;[System64Folder]reg.exe&quot; delete &quot;HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run&quot; /v Ninja /f"
+      Execute="deferred"
+      Impersonate="yes"
+      Return="ignore"
+    />
+
+    <InstallExecuteSequence>
+      <Custom
+        Action="Custom_RemoveRunEntry"
+        Before="InstallFinalize"
+        Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE"
       />
-      <RemoveRegistryValue
-        Root="HKCU"
-        Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
-        Name="Ninja" />
-      <RemoveRegistryValue
-        Root="HKCU"
-        Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
-        Name="Ninja" />
-    </Component>
+    </InstallExecuteSequence>
   </Package>
 </Wix>

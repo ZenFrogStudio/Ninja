@@ -7806,7 +7806,6 @@ version = "0.0.0"
 dependencies = [
  "ambassador",
  "anyhow",
- "auto-launch",
  "bon",
  "clap",
  "enum-as-inner",
@@ -7880,6 +7879,7 @@ dependencies = [
 name = "wm-platform"
 version = "0.0.0"
 dependencies = [
+ "auto-launch",
  "home",
  "libtest-mimic-collect",
  "objc2",
@@ -7896,6 +7896,7 @@ dependencies = [
  "windows 0.58.0",
  "windows-core 0.58.0",
  "windows-interface 0.58.0",
+ "winreg 0.55.0",
 ]
 
 [[package]]

@@ -39,18 +39,18 @@ if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
 }
 
 function Stop-Ninja {
-  # Ask the WM to exit cleanly first: that restores any hidden windows and
-  # lets the watcher shut down properly. Force-killing leaves both in a
-  # bad state.
+  # Ask the WM to exit cleanly first: that restores any hidden windows,
+  # takes the bar down with it, and lets the watcher shut down properly.
+  # Force-killing leaves all of them in a bad state.
   $cli = Join-Path $root 'target\release\ninja-cli.exe'
 
   if ((Test-Path $cli) -and (Get-Process ninja -ErrorAction SilentlyContinue)) {
-    Write-Host 'Stopping window manager...'
+    Write-Host 'Stopping Ninja...'
     & $cli command wm-exit *> $null
     Start-Sleep -Seconds 2
   }
 
-  foreach ($name in @('ninja-bar', 'ninja', 'ninja-watcher')) {
+  foreach ($name in @('ninja', 'ninja-watcher')) {
     Get-Process $name -ErrorAction SilentlyContinue |
       Stop-Process -Force -ErrorAction SilentlyContinue
   }
@@ -84,27 +84,22 @@ if ($Build) {
   # Binaries are locked while running, so stop first.
   Stop-Ninja
 
+  # `ninja` hosts both the bar and the window manager, so this is the
+  # only application binary. `custom-protocol` makes it load the built
+  # settings UI; without it Tauri falls back to a dev server that isn't
+  # running, and the settings window shows "localhost refused to
+  # connect". Debug builds are meant to use the dev server, so the
+  # feature is release-only.
+  #
   # Note: splatting an empty array at a native command misbehaves in
   # Windows PowerShell, so the profiles are branched explicitly.
   if ($Dev) {
-    cargo build -p wm -p wm-cli
+    cargo build -p ninja -p wm-cli
   } else {
-    cargo build --release -p wm -p wm-cli
+    cargo build --release -p ninja -p wm-cli --features ninja/custom-protocol
   }
 
-  if ($LASTEXITCODE -ne 0) { throw 'Window manager build failed.' }
-
-  # `custom-protocol` makes the bar load the built settings UI. Without it
-  # Tauri falls back to a dev server that isn't running, and the settings
-  # window shows "localhost refused to connect". Debug builds are meant to
-  # use the dev server, so the feature is release-only.
-  if ($Dev) {
-    cargo build -p ninja
-  } else {
-    cargo build --release -p ninja --features custom-protocol
-  }
-
-  if ($LASTEXITCODE -ne 0) { throw 'Bar build failed.' }
+  if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
 
   # The watcher is a background helper that outlives a crashed WM, so its
   # binary can stay locked by a process that didn't shut down cleanly.
@@ -121,14 +116,11 @@ if ($Build) {
   }
 }
 
-# --- Check binaries ---------------------------------------------------
-$wm = Join-Path $binDir 'ninja.exe'
-$bar = Join-Path $binDir 'ninja-bar.exe'
+# --- Check binary -----------------------------------------------------
+$exe = Join-Path $binDir 'ninja.exe'
 
-foreach ($exe in @($wm, $bar)) {
-  if (-not (Test-Path $exe)) {
-    throw "Missing $exe. Run: .\run.ps1 -Build$(if ($Dev) { ' -Dev' })"
-  }
+if (-not (Test-Path $exe)) {
+  throw "Missing $exe. Run: .\run.ps1 -Build$(if ($Dev) { ' -Dev' })"
 }
 
 # --- Resolve config ---------------------------------------------------
@@ -140,30 +132,20 @@ if (-not $Config) {
 Stop-Ninja
 
 # --- Start ------------------------------------------------------------
-# Window manager first: the bar's provider connects to it on startup.
-Write-Host "Starting window manager ($profileDir)..." -ForegroundColor Cyan
+Write-Host "Starting Ninja ($profileDir)..." -ForegroundColor Cyan
 
-$wmArgs = @('start')
+# `start` is the window manager's subcommand; the bar comes up alongside
+# it in the same process.
+$exeArgs = @('start')
 if ($Config) {
-  $wmArgs += @('--config', $Config)
+  $exeArgs += @('--config', $Config)
   Write-Host "  config: $Config" -ForegroundColor DarkGray
 }
 
 if ($Dev) {
-  Start-Process -FilePath $wm -ArgumentList $wmArgs
+  Start-Process -FilePath $exe -ArgumentList $exeArgs
 } else {
-  Start-Process -FilePath $wm -ArgumentList $wmArgs -WindowStyle Hidden
-}
-
-# Give the WM time to bind its IPC pipe before the bar tries to connect.
-Start-Sleep -Seconds 2
-
-Write-Host 'Starting bar...' -ForegroundColor Cyan
-
-if ($Dev) {
-  Start-Process -FilePath $bar
-} else {
-  Start-Process -FilePath $bar -WindowStyle Hidden
+  Start-Process -FilePath $exe -ArgumentList $exeArgs -WindowStyle Hidden
 }
 
 Write-Host ''
@@ -171,5 +153,5 @@ Write-Host 'Ninja is running.' -ForegroundColor Green
 Write-Host '  Stop with:  .\run.ps1 -Stop' -ForegroundColor DarkGray
 
 if (-not $Dev) {
-  Write-Host '  No logs in release builds. For logs: .\run.ps1 -Dev' -ForegroundColor DarkGray
+  Write-Host '  Logs: ~\.ninja\bar\errors.log.<date>. For a console: .\run.ps1 -Dev' -ForegroundColor DarkGray
 }

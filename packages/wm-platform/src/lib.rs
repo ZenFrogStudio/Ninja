@@ -2,6 +2,7 @@
 #![allow(clippy::missing_errors_doc)]
 #![feature(iterator_try_collect)]
 
+mod auto_launch;
 mod dispatcher;
 mod display;
 mod display_listener;
@@ -22,6 +23,7 @@ mod window_listener;
 #[cfg(feature = "test_utils")]
 pub mod test_utils;
 
+pub use auto_launch::*;
 pub use dispatcher::*;
 pub use display::*;
 pub use display_listener::*;

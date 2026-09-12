@@ -14,6 +14,8 @@
 - The client API now has a vitest test suite, run in CI.
 - Every `unsafe` block in the workspace now carries a `SAFETY` comment,
   and clippy enforces it.
+- `run.ps1` builds and launches the single `ninja.exe` instead of the
+  separate bar and window manager binaries it no longer produces.
 
 ### Security
 
@@ -32,6 +34,15 @@
   instead of being held until the bar closes.
 - A fatal error while the bar starts now shows an error dialog instead of
   exiting silently.
+- "Run on system startup" on Windows now checks that the startup entry
+  points at the running executable, and writes the path quoted. An entry
+  left behind by another copy of Ninja (a dev build, or an install that
+  has moved) showed the option as on while starting the wrong binary.
+- A widget command the window manager refuses is now logged with its
+  error instead of failing silently.
+- Installing or upgrading no longer deletes the "Run on system startup"
+  entry. The installer removed it on every install, not just on
+  uninstall, so Ninja stopped starting with Windows after each upgrade.
 
 ### Removed
 

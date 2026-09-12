@@ -3,6 +3,7 @@
 #[macro_use]
 extern crate libtest_mimic_collect;
 
+mod auto_launch;
 mod dispatcher;
 mod display;
 mod display_listener;
@@ -20,6 +21,7 @@ mod system_theme;
 mod thread_bound;
 mod window_listener;
 
+pub use auto_launch::*;
 pub use dispatcher::*;
 pub use display::*;
 pub use display_listener::*;
